@@ -1,4 +1,4 @@
-<div align="center"><img src="assets/mercurykit-banner.png" alt="MercuryKit" width="700"></div>
+<div align="center"><img src="assets/mercurykit-banner.png" alt="MercuryKit" width="900"></div>
 
 # MercuryKit
 
