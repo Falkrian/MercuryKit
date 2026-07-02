@@ -5,6 +5,24 @@ from mercurykit.archive import UnsupportedOperation
 
 
 class BfpkCodecMixin:
+    def _aes_256_cbc_crypt(self, data: bytes, *, decrypt: bool) -> bytes:
+        if len(data) % 16 != 0:
+            raise ValueError("BFPK AES table data must be 16-byte aligned")
+        try:
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        except ImportError as exc:
+            raise UnsupportedOperation("BFPK AES table support requires the cryptography package") from exc
+
+        cipher = Cipher(algorithms.AES(self.lords_of_shadow_ultimate_aes_key), modes.CBC(bytes(16)))
+        transform = cipher.decryptor() if decrypt else cipher.encryptor()
+        return transform.update(data) + transform.finalize()
+
+    def _decrypt_lords_of_shadow_ultimate_table(self, data: bytes) -> bytes:
+        return self._aes_256_cbc_crypt(data, decrypt=True)
+
+    def _encrypt_lords_of_shadow_ultimate_table(self, data: bytes) -> bytes:
+        return self._aes_256_cbc_crypt(data, decrypt=False)
+
     def _require_lz4_block(self):
         try:
             import lz4.block as lz4_block

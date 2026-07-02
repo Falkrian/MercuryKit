@@ -9,7 +9,7 @@ description = "MercurySteam BFPK archive toolkit."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "MercuryKit Contributors" }]
-dependencies = []
+dependencies = ["cryptography>=42"]
 
 [project.optional-dependencies]
 lz4 = ["lz4>=4.3"]

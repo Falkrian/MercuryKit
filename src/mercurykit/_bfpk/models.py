@@ -17,6 +17,8 @@ class BfpkHeader:
     file_count: int
     file_chunk_size: int | None
     table_offset: int
+    encrypted_table_size: int | None = None
+    table_prefix: bytes | None = None
 
 
 @dataclass(frozen=True)

@@ -28,6 +28,15 @@ class BfpkManifestMixin:
             file_chunk_size = None
             file_count = struct.unpack("<I", self._read_spacelords_d01_encrypted(reader, 4))[0]
             table_offset = 12
+        elif self._has_lords_of_shadow_ultimate_table(archive_version):
+            file_chunk_size = None
+            encrypted_table_size = reader.u32()
+            table = self._read_lords_of_shadow_ultimate_table(reader, encrypted_table_size)
+            if len(table) < 20:
+                raise ValueError("BFPK Lords of Shadow Ultimate Edition table is too small")
+            file_count = struct.unpack_from("<I", table, 16)[0]
+            table_offset = 12
+            return BfpkHeader(archive_version, file_count, file_chunk_size, table_offset, encrypted_table_size, table[:16])
         else:
             file_chunk_size = None
             file_count = reader.u32()
@@ -45,6 +54,16 @@ class BfpkManifestMixin:
 
     def _read_encrypted_picture_u64(self, reader: BinaryReader) -> int:
         return struct.unpack("<Q", self._read_spacelords_d01_encrypted(reader, 8))[0]
+
+    def _read_lords_of_shadow_ultimate_table(self, reader: BinaryReader, encrypted_table_size: int) -> bytes:
+        """Read the AES-CBC encrypted file table used by Lords of Shadow Ultimate Edition."""
+
+        if encrypted_table_size < 4:
+            raise ValueError("BFPK Lords of Shadow Ultimate Edition table size is invalid")
+        encrypted_size = encrypted_table_size + 16
+        if encrypted_size % 16 != 0:
+            raise ValueError("BFPK Lords of Shadow Ultimate Edition table is not AES block aligned")
+        return self._decrypt_lords_of_shadow_ultimate_table(reader.read_exact(encrypted_size))
 
     def _reader_size(self, reader: BinaryReader) -> int:
         old_position = reader.tell()
@@ -80,6 +99,8 @@ class BfpkManifestMixin:
         layouts: list[str] = []
         if self._supports_legacy_layout(archive_version):
             layouts.append(self.legacy_layout)
+        if self._supports_lords_of_shadow_ultimate_layout(archive_version):
+            layouts.append(self.lords_of_shadow_ultimate_layout)
         if self._supports_blades_of_fire_layout(archive_version):
             layouts.append(self.blades_of_fire_layout)
         if self._supports_spacelords_layout(archive_version):
@@ -98,6 +119,10 @@ class BfpkManifestMixin:
             if layout != expected_layout:
                 raise ValueError("BFPK encrypted picture archive does not use this table layout")
             return self._read_encrypted_picture_file_records(reader, header, file_size, layout)
+        if self._has_lords_of_shadow_ultimate_table(header.archive_version):
+            if layout != self.lords_of_shadow_ultimate_layout:
+                raise ValueError("BFPK Lords of Shadow Ultimate Edition archive does not use this table layout")
+            return self._read_lords_of_shadow_ultimate_file_records(reader, header, file_size)
         return self._read_file_records(reader, header, file_size, layout)
 
     def _read_file_records(
@@ -133,6 +158,50 @@ class BfpkManifestMixin:
             records.append(self._read_encrypted_picture_file_record(reader))
         self._validate_records(records, header, file_size, layout)
         return tuple(records)
+
+    def _read_lords_of_shadow_ultimate_file_records(
+        self,
+        reader: BinaryReader,
+        header: BfpkHeader,
+        file_size: int,
+    ) -> tuple[BfpkFileRecord, ...]:
+        if header.file_count > self.max_u32:
+            raise ValueError("BFPK file count is too large")
+        if header.encrypted_table_size is None:
+            raise ValueError("BFPK Lords of Shadow Ultimate Edition table size is missing")
+
+        reader.seek(header.table_offset)
+        table = self._read_lords_of_shadow_ultimate_table(reader, header.encrypted_table_size)
+        table_reader = BinaryReader.from_bytes(table)
+        table_reader.seek(16)
+        file_count = table_reader.u32()
+        if file_count != header.file_count:
+            raise ValueError("BFPK Lords of Shadow Ultimate Edition file count changed while parsing")
+
+        records = []
+        for _ in range(header.file_count):
+            records.append(self._read_lords_of_shadow_ultimate_file_record(table_reader))
+        self._validate_lords_of_shadow_ultimate_table_padding(table_reader)
+        self._validate_records(records, header, file_size, self.lords_of_shadow_ultimate_layout)
+        return tuple(records)
+
+    def _read_lords_of_shadow_ultimate_file_record(self, reader: BinaryReader) -> BfpkFileRecord:
+        file_name_length = reader.u32()
+        if file_name_length == 0 or file_name_length > 4096:
+            raise ValueError("BFPK file name length is invalid")
+        file_name = reader.read_string(file_name_length)
+        if not self._is_safe_archive_path(file_name):
+            raise ValueError(f"BFPK file path is unsafe: {file_name!r}")
+
+        file_uncompressed_size = reader.u32()
+        file_offset = reader.u32()
+        return BfpkFileRecord(file_name, file_uncompressed_size, file_offset)
+
+    def _validate_lords_of_shadow_ultimate_table_padding(self, reader: BinaryReader) -> None:
+        # The shipping archives carry AES block padding after the final row. The
+        # game does not read those bytes, so MercuryKit only requires that row
+        # parsing finishes inside the decrypted table.
+        reader.seek(0, 2)
 
     def _read_encrypted_picture_file_record(self, reader: BinaryReader) -> BfpkFileRecord:
         """Read a `0xD01`/`0x901` row; the opaque hash field is preserved but not validated."""
@@ -205,6 +274,10 @@ class BfpkManifestMixin:
 
     def _table_end_offset(self, records: list[BfpkFileRecord], header: BfpkHeader, layout: str) -> int:
         row_size = sum(4 + len(record.path.encode("utf-8")) + 4 + 8 for record in records)
+        if layout == self.lords_of_shadow_ultimate_layout:
+            if header.encrypted_table_size is None:
+                raise ValueError("BFPK Lords of Shadow Ultimate Edition table size is missing")
+            return header.table_offset + 16 + header.encrypted_table_size
         if layout == self.blades_of_fire_layout:
             row_size += 12 * len(records)
         elif layout == self.spacelords_layout:
@@ -238,6 +311,11 @@ class BfpkManifestMixin:
                 raise ValueError("BFPK Spacelords payload offsets are not monotonic")
             return record.offset
 
+        if layout == self.lords_of_shadow_ultimate_layout:
+            if record.offset < previous_offset:
+                raise ValueError("BFPK Lords of Shadow Ultimate Edition payload offsets are not monotonic")
+            return record.offset
+
         return previous_offset
 
     def _validate_encrypted_picture_record_metadata(self, record: BfpkFileRecord, label: str) -> None:
@@ -255,6 +333,12 @@ class BfpkManifestMixin:
     ) -> None:
         if layout == self.blades_of_fire_layout and header.archive_version in {0x100, 0x300}:
             self._validate_raw_payload_bounds(records, file_size, "BFPK raw")
+        elif layout == self.lords_of_shadow_ultimate_layout and header.archive_version == 0x2:
+            self._validate_raw_payload_bounds(records, file_size, "BFPK Lords of Shadow Ultimate Edition raw")
+        elif layout == self.lords_of_shadow_ultimate_layout and header.archive_version == 0x3:
+            for record in records:
+                if record.offset + 4 > file_size:
+                    raise ValueError("BFPK Lords of Shadow Ultimate Edition zlib payload extends beyond archive data")
         elif layout == self.spacelords_layout and header.archive_version == 0x500:
             self._validate_raw_payload_bounds(records, file_size, "BFPK Spacelords raw")
         elif self._has_encrypted_picture_table(header.archive_version):
@@ -422,6 +506,9 @@ class BfpkManifestMixin:
                 return self._spacelords_502_entry(reader, record, file_chunk_size)
             raise UnsupportedOperation(f"BFPK Spacelords archive version 0x{archive_version:x} is not supported")
 
+        if layout == self.lords_of_shadow_ultimate_layout:
+            return self._lords_of_shadow_ultimate_entry(reader, archive_version, record)
+
         if layout == self.blades_of_fire_layout:
             if archive_version == self.blades_of_fire_pics_archive_version:
                 return self._blades_of_fire_pics_entry(reader, record)
@@ -442,6 +529,56 @@ class BfpkManifestMixin:
                 raise ValueError("BFPK 0x102 archive does not define a file chunk size")
             return self._entry_for_102(reader, record, file_chunk_size)
         raise UnsupportedOperation(f"BFPK archive version 0x{archive_version:x} is not supported")
+
+    def _lords_of_shadow_ultimate_entry(
+        self,
+        reader: BinaryReader,
+        archive_version: int,
+        record: BfpkFileRecord,
+    ) -> ArchiveEntry:
+        metadata = {
+            "archive_version": archive_version,
+            "table_format": self.lords_of_shadow_ultimate_layout,
+        }
+        if archive_version == 0x2:
+            return ArchiveEntry(
+                path=record.path,
+                offset=record.offset,
+                uncompressed_size=record.uncompressed_size,
+                stored_size=record.uncompressed_size,
+                metadata={"compressed": False, **metadata},
+            )
+
+        if archive_version != 0x3:
+            raise UnsupportedOperation(
+                f"BFPK Lords of Shadow Ultimate Edition archive version 0x{archive_version:x} is not supported"
+            )
+
+        old_position = reader.tell()
+        try:
+            reader.seek(record.offset)
+            stored_size = reader.u32()
+            file_size = self._reader_size(reader)
+        finally:
+            reader.seek(old_position)
+        if record.offset + 4 + stored_size > file_size:
+            raise ValueError("BFPK Lords of Shadow Ultimate Edition zlib payload extends beyond archive data")
+
+        compressed = stored_size != record.uncompressed_size
+        return ArchiveEntry(
+            path=record.path,
+            offset=record.offset + 4,
+            uncompressed_size=record.uncompressed_size,
+            compressed_size=stored_size if compressed else None,
+            stored_size=4 + stored_size,
+            compression="zlib" if compressed else None,
+            metadata={
+                "compressed": compressed,
+                "chunked": False,
+                "payload_record_offset": record.offset,
+                **metadata,
+            },
+        )
 
     def _entry_for_100(self, record: BfpkFileRecord) -> ArchiveEntry:
         return ArchiveEntry(

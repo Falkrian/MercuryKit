@@ -23,7 +23,7 @@ MercuryKit is a Python package and command line toolkit for working with Mercury
 - Unpack archives with path safety checks to avoid writing outside the destination directory.
 - Repack extracted folders back into supported archive versions.
 - Preserve useful archive metadata, including encrypted picture archive table metadata.
-- Support raw, zlib-compressed, LZ4-block-compressed, and encrypted picture archive layouts.
+- Support raw, zlib-compressed, LZ4-block-compressed, AES-encrypted table, and encrypted picture archive layouts.
 - Show progress automatically on interactive terminals, with switches to force or suppress it.
 - Use MercuryKit from Python through the public `mercurykit` package.
 
@@ -31,6 +31,7 @@ MercuryKit is a Python package and command line toolkit for working with Mercury
 
 | Game | Support | Support Comment |
 | --- | --- | --- |
+| Castlevania: Lords of Shadow - Ultimate Edition | Full | Supports Steam `.dat` archives using AES-256-CBC encrypted file tables, including raw `0x2` and zlib-record `0x3` variants. |
 | Castlevania: Lords of Shadow 2 | Full | Supports archive versions `0x100`, `0x101`, and `0x102`, including raw, zlib, and chunked zlib variants. |
 | Castlevania Lords of Shadow - Mirror of Fate HD | Full | Supports `.pack` archives, including scan, unpack, directory-based repack, computed header fields, and automatic `system/files.toc` updates. |
 | Blades of Fire | Full* | Supports archive versions `0x100`, `0x102`, `0x300`, and encrypted `Pics.packed` archives using `0x901`. JPG entries are preserved as packed payloads until the viewer-ready restoration transform is implemented. |
@@ -55,6 +56,32 @@ python -m pip install -e ".[lz4]"
 ```
 
 ## Quick Start
+
+### Castlevania: Lords of Shadow - Ultimate Edition
+
+Scan:
+
+```powershell
+mercurykit scan "D:\Steam\steamapps\common\CastlevaniaLoS\Data00.dat" --verbose
+```
+
+Unpack:
+
+```powershell
+mercurykit unpack "D:\Steam\steamapps\common\CastlevaniaLoS\Data00.dat" --dest ".\Output\losue-data00"
+```
+
+Repack a zlib-record `.dat` archive:
+
+```powershell
+mercurykit repack ".\Output\losue-data00" --output ".\Data00.repacked.dat" --option layout=lords_of_shadow_ultimate --option archive_version=0x3 --option compression_level=6
+```
+
+Repack a raw `.dat` archive:
+
+```powershell
+mercurykit repack ".\Output\losue-data03" --output ".\Data03.repacked.dat" --option layout=lords_of_shadow_ultimate --option archive_version=0x2
+```
 
 ### Castlevania: Lords of Shadow 2
 
@@ -212,14 +239,14 @@ Builds an archive from a directory tree.
 
 `--option` values accept strings, decimal integers, hexadecimal integers such as `0x901`, and booleans.
 
-Mirror of Fate HD repacks are selected automatically when `--output` ends in `.pack` and no BFPK `layout` or `archive_version` option is supplied. BFPK repacks use the options below.
+Mirror of Fate HD repacks are selected automatically when `--output` ends in `.pack` and no BFPK `layout` or `archive_version` option is supplied. Castlevania: Lords of Shadow - Ultimate Edition `.dat` repacks use `layout=lords_of_shadow_ultimate` with `archive_version=0x2` or `archive_version=0x3`. Other BFPK repacks use the options below.
 
 ## Repack Options
 
 | Option | Description |
 | --- | --- |
-| `archive_version` | Required archive version, such as `0x100`, `0x102`, `0x500`, `0x502`, `0x901`, or `0xd01`. |
-| `layout` | Archive layout. Supported values include `legacy`, `blades_of_fire`, and `spacelords`. Defaults to `legacy`. |
+| `archive_version` | Required archive version, such as `0x2`, `0x3`, `0x100`, `0x102`, `0x500`, `0x502`, `0x901`, or `0xd01`. |
+| `layout` | Archive layout. Supported values include `legacy`, `lords_of_shadow_ultimate`, `blades_of_fire`, and `spacelords`. Defaults to `legacy`. |
 | `file_chunk_size` | Positive chunk size used by chunked compressed archive versions. |
 | `trailing_padding` | Non-negative number of padding bytes to append after archive data. |
 | `compression_level` | zlib compression level for zlib-based repacks. Defaults to Python's zlib default. |
@@ -228,3 +255,5 @@ Mirror of Fate HD repacks are selected automatically when `--output` ends in `.p
 Encrypted picture archive repacks preserve `opaque_hash` metadata for unchanged files when manifest metadata is available. New or changed entries receive a deterministic value; MercuryKit does not validate that field as a CRC.
 
 Mirror of Fate HD repacks compute the `.pack` header fields automatically. The optional `pack_size` value is only a validation check; it is not required for normal repacks.
+
+Castlevania: Lords of Shadow - Ultimate Edition `.dat` archives use AES-256-CBC encrypted file tables. MercuryKit decrypts those tables for scanning and unpacking, and writes new encrypted tables during repack.

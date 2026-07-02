@@ -353,6 +353,63 @@ def _build_spacelords_d01_archive(
     path.write_bytes(bytes(archive))
 
 
+def _build_lords_of_shadow_ultimate_dat_archive(
+    path: Path,
+    files: dict[str, bytes],
+    archive_version: int,
+    *,
+    table_prefix: bytes = b"\x82\xa0\xf1\x30\xaf\x30\x2f\xe6\x7a\xe8\x5b\xb0\x54\xc3\xb7\x1f",
+    raw_zlib_records: set[str] | None = None,
+) -> None:
+    if archive_version not in {0x2, 0x3}:
+        raise ValueError("LoS UE test archives support only 0x2 and 0x3")
+    if len(table_prefix) != 16:
+        raise ValueError("LoS UE table prefix must be 16 bytes")
+
+    engine = BfpkEngine()
+    raw_zlib_records = raw_zlib_records or set()
+
+    def payload_for(name: str, data: bytes) -> bytes:
+        if archive_version == 0x2:
+            return data
+        if name in raw_zlib_records:
+            return len(data).to_bytes(4, "little") + data
+        compressed = zlib.compress(data)
+        return len(compressed).to_bytes(4, "little") + compressed
+
+    payloads = [(name, payload_for(name, data)) for name, data in files.items()]
+
+    def table_for(offsets: list[int]) -> bytes:
+        table = bytearray(table_prefix)
+        table += len(files).to_bytes(4, "little")
+        for (name, data), offset in zip(files.items(), offsets):
+            encoded_name = name.encode("utf-8")
+            table += len(encoded_name).to_bytes(4, "little")
+            table += encoded_name
+            table += len(data).to_bytes(4, "little")
+            table += offset.to_bytes(4, "little")
+        table += b"\x00" * ((-len(table)) % 16)
+        return bytes(table)
+
+    placeholder_table = table_for([0] * len(files))
+    current_offset = 12 + len(placeholder_table)
+    offsets = []
+    for _, payload in payloads:
+        offsets.append(current_offset)
+        current_offset += len(payload)
+
+    table = table_for(offsets)
+    assert len(table) == len(placeholder_table)
+    archive = bytearray()
+    archive += b"BFPK"
+    archive += archive_version.to_bytes(4, "little")
+    archive += (len(table) - 16).to_bytes(4, "little")
+    archive += engine._encrypt_lords_of_shadow_ultimate_table(table)
+    for _, payload in payloads:
+        archive += payload
+    path.write_bytes(bytes(archive))
+
+
 def _build_mirror_of_fate_pack(
     path: Path,
     files: list[tuple[str, bytes]],
@@ -783,6 +840,155 @@ def test_spacelords_d01_rejects_unsafe_paths(tmp_path: Path) -> None:
     archive.write_bytes(b"BFPK" + (0xD01).to_bytes(4, "little") + engine._crypt_spacelords_d01_table(bytes(table), 8))
 
     assert ArchiveScanner().scan(archive, read_manifest=True).selected is None
+
+
+def test_lords_of_shadow_ultimate_aes_table_round_trip() -> None:
+    engine = BfpkEngine()
+    plaintext = b"\x11" * 16 + (0).to_bytes(4, "little") + b"\x00" * 12
+
+    encrypted = engine._encrypt_lords_of_shadow_ultimate_table(plaintext)
+
+    assert encrypted != plaintext
+    assert engine._decrypt_lords_of_shadow_ultimate_table(encrypted) == plaintext
+
+
+def test_lords_of_shadow_ultimate_raw_manifest_extract_and_scan(tmp_path: Path) -> None:
+    archive = tmp_path / "Data03.dat"
+    files = {
+        "music/intro.ogg": b"OggSintro",
+        "system/readme.txt": b"plain text",
+    }
+    _build_lords_of_shadow_ultimate_dat_archive(archive, files, 0x2)
+
+    outcome = ArchiveScanner().require_archive(archive, read_manifest=True)
+    assert outcome.info is not None
+    assert outcome.selected is not None
+    assert outcome.selected.reason == "BFPK lords_of_shadow_ultimate layout matched"
+    assert outcome.info.metadata["archive_version"] == 0x2
+    assert outcome.info.metadata["table_format"] == "lords_of_shadow_ultimate"
+    assert outcome.info.metadata["encrypted_table_size"] is not None
+    assert outcome.info.metadata["table_prefix"] == b"\x82\xa0\xf1\x30\xaf\x30\x2f\xe6\x7a\xe8\x5b\xb0\x54\xc3\xb7\x1f"
+    assert _extract_all(archive) == files
+
+
+def test_lords_of_shadow_ultimate_zlib_manifest_extract_and_raw_record(tmp_path: Path) -> None:
+    archive = tmp_path / "Data00.dat"
+    files = {
+        "bmp/lights/lights.ini": b"light=1\n" * 20,
+        "bmp/lights/raw.bin": b"raw-payload",
+    }
+    _build_lords_of_shadow_ultimate_dat_archive(archive, files, 0x3, raw_zlib_records={"bmp/lights/raw.bin"})
+
+    context = BfpkEngine().open(archive)
+    entries = tuple(BfpkEngine().iter_entries(context))
+
+    assert entries[0].compression == "zlib"
+    assert entries[0].metadata["compressed"] is True
+    assert entries[1].compression is None
+    assert entries[1].metadata["compressed"] is False
+    assert _extract_all(archive) == files
+
+
+def test_lords_of_shadow_ultimate_rejects_malformed_tables_paths_and_payloads(tmp_path: Path) -> None:
+    engine = BfpkEngine()
+
+    invalid_length = tmp_path / "invalid_length.dat"
+    invalid_length.write_bytes(b"BFPK" + (0x2).to_bytes(4, "little") + (5).to_bytes(4, "little") + b"\x00" * 21)
+    assert ArchiveScanner().scan(invalid_length, read_manifest=True).selected is None
+
+    malformed_row = tmp_path / "malformed_row.dat"
+    table = b"\x00" * 16 + (1).to_bytes(4, "little") + b"\x00" * 12
+    malformed_row.write_bytes(
+        b"BFPK"
+        + (0x2).to_bytes(4, "little")
+        + (len(table) - 16).to_bytes(4, "little")
+        + engine._encrypt_lords_of_shadow_ultimate_table(table)
+    )
+    assert ArchiveScanner().scan(malformed_row, read_manifest=True).selected is None
+
+    unsafe = tmp_path / "unsafe.dat"
+    _build_lords_of_shadow_ultimate_dat_archive(unsafe, {"../escape.bin": b"payload"}, 0x2)
+    assert ArchiveScanner().scan(unsafe, read_manifest=True).selected is None
+
+    beyond_eof = tmp_path / "beyond_eof.dat"
+    _build_lords_of_shadow_ultimate_dat_archive(beyond_eof, {"file.bin": b"payload"}, 0x3)
+    beyond_eof.write_bytes(beyond_eof.read_bytes()[:-2])
+    assert ArchiveScanner().scan(beyond_eof, read_manifest=True).selected is None
+
+
+def test_lords_of_shadow_ultimate_repack_round_trips_raw_and_zlib(tmp_path: Path) -> None:
+    files = {
+        "system/config.ini": b"quality=high\n" * 8,
+        "video/subtitles.txt": b"subtitle text",
+    }
+    source = tmp_path / "source"
+    source.mkdir()
+    _write_source_files(source, files)
+
+    for archive_version in (0x2, 0x3):
+        archive = tmp_path / f"Data{archive_version}.dat"
+        BfpkEngine().repack(
+            source,
+            archive,
+            {
+                "layout": "lords_of_shadow_ultimate",
+                "archive_version": archive_version,
+                "compression_level": 9,
+            },
+        )
+        assert _extract_all(archive) == files
+        with archive.open("rb") as file:
+            reader = BinaryReader(file)
+            assert reader.read_exact(4) == b"BFPK"
+            assert reader.u32() == archive_version
+            encrypted_table_size = reader.u32()
+            decrypted = BfpkEngine()._decrypt_lords_of_shadow_ultimate_table(reader.read_exact(encrypted_table_size + 16))
+            assert decrypted.startswith(BfpkEngine().lords_of_shadow_ultimate_table_prefix)
+
+
+def test_lords_of_shadow_ultimate_real_archives_when_available(tmp_path: Path) -> None:
+    root = Path(r"D:\Steam\steamapps\common\CastlevaniaLoS")
+    cases = [
+        ("Data00.dat", 0x3, 3511),
+        ("Data01.dat", 0x3, 2079),
+        ("Data02.dat", 0x3, 1797),
+        ("Data03.dat", 0x2, 856),
+        ("Data04.dat", 0x3, 6825),
+        ("Data05.dat", 0x3, 4753),
+        ("Data06.dat", 0x3, 5208),
+        ("Data07.dat", 0x3, 1270),
+        ("Data08.dat", 0x3, 793),
+        ("Data09.dat", 0x3, 1196),
+        ("Data10.dat", 0x3, 1477),
+        ("Data11.dat", 0x3, 747),
+        ("Data12.dat", 0x3, 1532),
+        ("Data13.dat", 0x3, 1665),
+        ("Data14.dat", 0x3, 922),
+        ("Data15.dat", 0x3, 1010),
+        ("Data16.dat", 0x3, 1102),
+        ("Data17.dat", 0x3, 1330),
+    ]
+    if not all((root / name).is_file() for name, _, _ in cases):
+        pytest.skip("Castlevania: Lords of Shadow - Ultimate Edition Steam archives are not available")
+
+    engine = BfpkEngine()
+    for name, archive_version, entry_count in cases:
+        archive = root / name
+        outcome = ArchiveScanner().require_archive(archive, read_manifest=True)
+        assert outcome.info is not None
+        assert outcome.info.metadata["table_format"] == "lords_of_shadow_ultimate"
+        assert outcome.info.metadata["archive_version"] == archive_version
+        assert outcome.info.entry_count == entry_count
+
+    for name, _, _ in (cases[0], cases[3]):
+        archive = root / name
+
+        context = engine.open(archive)
+        entries = tuple(engine.iter_entries(context))
+        for entry in (entries[0], entries[len(entries) // 2], entries[-1]):
+            output = BytesIO()
+            engine.extract_entry(context, entry, output)
+            assert len(output.getvalue()) == entry.uncompressed_size
 
 
 def test_malformed_archives_do_not_match(tmp_path: Path) -> None:

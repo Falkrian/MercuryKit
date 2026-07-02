@@ -32,6 +32,9 @@ class BfpkRepackMixin:
         if layout == self.blades_of_fire_layout:
             self._repack_blades_of_fire(input_dir, output_path, options, progress)
             return
+        if layout == self.lords_of_shadow_ultimate_layout:
+            self._repack_lords_of_shadow_ultimate(input_dir, output_path, options, progress)
+            return
         self._repack_legacy(input_dir, output_path, options, progress)
 
     def _repack_legacy(
@@ -331,6 +334,122 @@ class BfpkRepackMixin:
             record_size=self._spacelords_d01_record_size,
             write_payload=self._write_spacelords_d01_payload,
         )
+
+    def _repack_lords_of_shadow_ultimate(
+        self,
+        input_dir: Path,
+        output_path: Path,
+        options: dict[str, object],
+        progress: ProgressReporter,
+    ) -> None:
+        archive_version = self._required_int_option(options, "archive_version")
+        if archive_version not in self.lords_of_shadow_ultimate_archive_versions:
+            raise UnsupportedOperation(
+                "BFPK Lords of Shadow Ultimate Edition repack supports archive_version=0x2 or 0x3"
+            )
+
+        trailing_padding = self._int_option(options, "trailing_padding", 0)
+        compression_level = self._int_option(options, "compression_level", self.default_compression_level)
+        if trailing_padding < 0:
+            raise ValueError("BFPK trailing_padding must be non-negative")
+
+        input_dir = input_dir.resolve()
+        output_path = output_path.resolve()
+        self._validate_repack_paths(input_dir, output_path)
+
+        files = self._collect_repack_files(input_dir)
+        self._check_u32(len(files), "BFPK Lords of Shadow Ultimate Edition file count")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        repack_files = self._prepare_repack_files(
+            input_dir,
+            files,
+            output_path.name,
+            compute_hash=False,
+            include_total_bytes=True,
+            progress=progress,
+        )
+
+        placeholder_offsets = [0] * len(repack_files)
+        placeholder_table = self._build_lords_of_shadow_ultimate_table(repack_files, placeholder_offsets)
+        encrypted_table_size = len(placeholder_table) - 16
+        self._check_u32(encrypted_table_size, "BFPK Lords of Shadow Ultimate Edition encrypted table size")
+
+        payload_offsets: list[int] = []
+        progress.start(
+            f"Repacking {output_path.name}",
+            total_items=len(repack_files),
+            total_bytes=sum(file.uncompressed_size for file in repack_files),
+        )
+        with output_path.open("w+b") as output:
+            try:
+                output.write(self.archive_magic)
+                output.write(struct.pack("<I", archive_version))
+                output.write(struct.pack("<I", encrypted_table_size))
+                output.write(self._encrypt_lords_of_shadow_ultimate_table(placeholder_table))
+
+                for repack_file in repack_files:
+                    file_offset = output.tell()
+                    self._check_u32(file_offset, f"BFPK Lords of Shadow Ultimate Edition payload offset for {repack_file.path}")
+                    payload_offsets.append(file_offset)
+                    if archive_version == 0x2:
+                        self._write_raw_payload(output, repack_file.source_path, progress)
+                    else:
+                        self._write_lords_of_shadow_ultimate_zlib_payload(
+                            output,
+                            repack_file,
+                            compression_level,
+                            progress,
+                        )
+                    progress.advance(items=1, detail=repack_file.path)
+
+                if trailing_padding:
+                    output.write(b"\x00" * trailing_padding)
+
+                table = self._build_lords_of_shadow_ultimate_table(repack_files, payload_offsets)
+                if len(table) != len(placeholder_table):
+                    raise ValueError("BFPK Lords of Shadow Ultimate Edition table size changed during repack")
+                output.seek(12)
+                output.write(self._encrypt_lords_of_shadow_ultimate_table(table))
+            finally:
+                progress.finish()
+
+    def _build_lords_of_shadow_ultimate_table(
+        self,
+        repack_files: list[BfpkRepackFile],
+        payload_offsets: list[int],
+    ) -> bytes:
+        if len(repack_files) != len(payload_offsets):
+            raise ValueError("BFPK Lords of Shadow Ultimate Edition table offset count mismatch")
+
+        table = bytearray(self.lords_of_shadow_ultimate_table_prefix)
+        if len(table) != 16:
+            raise ValueError("BFPK Lords of Shadow Ultimate Edition table prefix must be 16 bytes")
+        table += struct.pack("<I", len(repack_files))
+        for repack_file, payload_offset in zip(repack_files, payload_offsets):
+            self._check_u32(payload_offset, f"BFPK Lords of Shadow Ultimate Edition payload offset for {repack_file.path}")
+            table += struct.pack("<I", len(repack_file.encoded_path))
+            table += repack_file.encoded_path
+            table += struct.pack("<I", repack_file.uncompressed_size)
+            table += struct.pack("<I", payload_offset)
+        table += b"\x00" * ((-len(table)) % 16)
+        return bytes(table)
+
+    def _write_lords_of_shadow_ultimate_zlib_payload(
+        self,
+        output: BinaryIO,
+        repack_file: BfpkRepackFile,
+        compression_level: int,
+        progress: ProgressReporter,
+    ) -> int:
+        data = repack_file.source_path.read_bytes()
+        compressed = zlib.compress(data, compression_level)
+        payload = data if len(compressed) == len(data) else compressed
+        self._check_u32(len(payload), f"BFPK Lords of Shadow Ultimate Edition stored size for {repack_file.path}")
+        output.write(struct.pack("<I", len(payload)))
+        output.write(payload)
+        progress.advance(bytes_count=len(data))
+        return 4 + len(payload)
 
     def _repack_encrypted_picture_archive(
         self,
@@ -751,6 +870,14 @@ class BfpkRepackMixin:
             return self.blades_of_fire_layout
         if layout in {"spacelords", "spacelord", "raiders_of_the_broken_planet", "raidersofthebrokenplanet"}:
             return self.spacelords_layout
+        if layout in {
+            "lords_of_shadow_ultimate",
+            "lords_of_shadow_ultimate_edition",
+            "losue",
+            "los_ultimate",
+            "castlevania_lords_of_shadow_ultimate_edition",
+        }:
+            return self.lords_of_shadow_ultimate_layout
         raise ValueError(f"BFPK layout is not supported: {raw_layout}")
 
     def _required_int_option(self, options: dict[str, object], key: str) -> int:
