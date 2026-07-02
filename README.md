@@ -4,12 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](https://opensource.org/licenses/MIT)
 [![Twitter](https://img.shields.io/twitter/follow/FalkrianTTV?label=%40FalkrianTTV)](https://twitter.com/FalkrianTTV)
-<<<<<<< HEAD
-=======
 
 MercuryKit is a Python package and command line toolkit for working with MercurySteam archive files. It can scan archives, unpack their contents safely, and repack edited directory trees back into archive form for supported game layouts.
-
-The project is intended for modding, preservation, research, and archive inspection workflows where repeatable command line behavior matters. MercuryKit keeps archive metadata where possible, validates paths before extraction, and provides progress reporting for longer unpack and repack jobs.
 
 ## Features
 
@@ -48,48 +44,30 @@ Install optional LZ4 support when working with archive versions that use LZ4-blo
 python -m pip install -e ".[lz4]"
 ```
 
-Install the test dependencies:
-
-```powershell
-python -m pip install -e ".[dev]"
-```
-
 ## Quick Start
 
 Scan a single archive:
 
 ```powershell
-mercurykit scan "D:\Games\Spacelords\Pics.packed"
+mercurykit scan "D:\Steam\steamapps\common\Castlevania Lords of Shadow 2\English.packed"
 ```
 
 Scan a folder recursively and print detailed matches:
 
 ```powershell
-mercurykit scan "D:\Games\Blades of Fire" --recursive --verbose
+mercurykit scan "D:\Steam\steamapps\common\Castlevania Lords of Shadow 2" --recursive --verbose
 ```
 
 Unpack an archive:
 
 ```powershell
-mercurykit unpack "D:\Games\Spacelords\Pics.packed" --dest ".\Output"
+mercurykit unpack "D:\Steam\steamapps\common\Spacelords\Music.packed" --dest ".\Output"
 ```
 
 Unpack and overwrite existing files:
 
 ```powershell
-mercurykit unpack ".\Pics.packed" --dest ".\Output" --overwrite
-```
-
-Repack a Blades of Fire picture archive:
-
-```powershell
-mercurykit repack ".\Output" --output ".\Pics.repacked" --option layout=blades_of_fire --option archive_version=0x901
-```
-
-Repack a Spacelords picture archive:
-
-```powershell
-mercurykit repack ".\Output" --output ".\Pics.repacked" --option layout=spacelords --option archive_version=0xd01
+mercurykit unpack "D:\Steam\steamapps\common\Project Iron\Data00.packed" --dest ".\Output" --overwrite
 ```
 
 Repack a chunked archive with explicit chunk and compression settings:
