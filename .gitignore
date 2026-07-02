@@ -219,4 +219,5 @@ __marimo__/
 
 # Custom
 /research
-/tests
+/tests/__pycache__/
+/tests/**/*.pyc

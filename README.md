@@ -32,6 +32,7 @@ MercuryKit is a Python package and command line toolkit for working with Mercury
 | Game | Support | Support Comment |
 | --- | --- | --- |
 | Castlevania: Lords of Shadow 2 | Full | Supports archive versions `0x100`, `0x101`, and `0x102`, including raw, zlib, and chunked zlib variants. |
+| Castlevania Lords of Shadow - Mirror of Fate HD | Full | Supports `.pack` archives, including scan, unpack, directory-based repack, computed header fields, and automatic `system/files.toc` updates. |
 | Blades of Fire | Full* | Supports archive versions `0x100`, `0x102`, `0x300`, and encrypted `Pics.packed` archives using `0x901`. JPG entries are preserved as packed payloads until the viewer-ready restoration transform is implemented. |
 | Spacelords | Full | Supports archive versions `0x500`, `0x502`, and encrypted `Pics.packed` archives using `0xD01`, including LZ4-block variants. |
 
@@ -55,34 +56,106 @@ python -m pip install -e ".[lz4]"
 
 ## Quick Start
 
-Scan a single archive:
+### Castlevania: Lords of Shadow 2
+
+Scan:
 
 ```powershell
 mercurykit scan "D:\Steam\steamapps\common\Castlevania Lords of Shadow 2\English.packed"
 ```
 
+Unpack:
+
+```powershell
+mercurykit unpack "D:\Steam\steamapps\common\Castlevania Lords of Shadow 2\English.packed" --dest ".\Output\los2-english"
+```
+
+Repack:
+
+```powershell
+mercurykit repack ".\Output\los2-english" --output ".\English.repacked" --option archive_version=0x102 --option file_chunk_size=262144 --option compression_level=6
+```
+
+### Castlevania Lords of Shadow - Mirror of Fate HD
+
+Scan:
+
+```powershell
+mercurykit scan "D:\Steam\steamapps\common\Castlevania Lords of Shadow - Mirror of Fate HD\data.pack" --verbose
+```
+
+Unpack:
+
+```powershell
+mercurykit unpack "D:\Steam\steamapps\common\Castlevania Lords of Shadow - Mirror of Fate HD\data.pack" --dest ".\Output\mofh-data"
+```
+
+Repack:
+
+```powershell
+mercurykit repack ".\Output\mofh-data" --output ".\data.repacked.pack"
+```
+
+Mirror of Fate HD `.pack` output automatically uses the Mirror of Fate HD repacker when no BFPK `layout` or `archive_version` option is supplied. If `system/files.toc` is present, MercuryKit updates its path-hash and file-size records in the repacked archive.
+
+### Blades of Fire
+
+Scan:
+
+```powershell
+mercurykit scan "D:\Steam\steamapps\common\Blades of Fire\Data00.packed"
+```
+
+Unpack:
+
+```powershell
+mercurykit unpack "D:\Steam\steamapps\common\Blades of Fire\Data00.packed" --dest ".\Output\blades-data" --overwrite
+```
+
+Repack:
+
+```powershell
+mercurykit repack ".\Output\blades-data" --output ".\Data00.repacked.packed" --option layout=blades_of_fire --option archive_version=0x102
+```
+
+Repack encrypted picture archives with the picture layout version:
+
+```powershell
+mercurykit repack ".\Output\blades-pics" --output ".\Pics.repacked.packed" --option layout=blades_of_fire --option archive_version=0x901
+```
+
+### Spacelords
+
+Scan:
+
+```powershell
+mercurykit scan "D:\Steam\steamapps\common\Spacelords\Data00.packed"
+```
+
+Unpack:
+
+```powershell
+mercurykit unpack "D:\Steam\steamapps\common\Spacelords\Data00.packed" --dest ".\Output\spacelords-data"
+```
+
+Repack:
+
+```powershell
+mercurykit repack ".\Output\spacelords-data" --output ".\Data00.repacked.packed" --option layout=spacelords --option archive_version=0x502
+```
+
+Repack encrypted picture archives with the picture layout version:
+
+```powershell
+mercurykit repack ".\Output\spacelords-pics" --output ".\Pics.repacked.packed" --option layout=spacelords --option archive_version=0xd01
+```
+
+### Directory Scans
+
 Scan a folder recursively and print detailed matches:
 
 ```powershell
-mercurykit scan "D:\Steam\steamapps\common\Castlevania Lords of Shadow 2" --recursive --verbose
-```
-
-Unpack an archive:
-
-```powershell
-mercurykit unpack "D:\Steam\steamapps\common\Spacelords\Music.packed" --dest ".\Output"
-```
-
-Unpack and overwrite existing files:
-
-```powershell
-mercurykit unpack "D:\Steam\steamapps\common\Project Iron\Data00.packed" --dest ".\Output" --overwrite
-```
-
-Repack a chunked archive with explicit chunk and compression settings:
-
-```powershell
-mercurykit repack ".\Output" --output ".\Data.repacked" --option archive_version=0x102 --option file_chunk_size=262144 --option compression_level=6
+mercurykit scan "D:\Steam\steamapps\common" --recursive --verbose
 ```
 
 ## CLI Reference
@@ -93,7 +166,7 @@ mercurykit repack ".\Output" --output ".\Data.repacked" --option archive_version
 mercurykit scan PATH... [--recursive] [--verbose]
 ```
 
-Scans files or directories for supported archives.
+Scans files or directories for all supported archive types.
 
 | Switch | Description |
 | --- | --- |
@@ -109,7 +182,7 @@ Empty files are skipped. A scan of unsupported files reports that no compatible 
 mercurykit unpack FILE... [--dest PATH] [--overwrite] [--progress | --no-progress]
 ```
 
-Extracts one or more archives.
+Extracts one or more supported archives.
 
 | Switch | Description |
 | --- | --- |
@@ -139,6 +212,8 @@ Builds an archive from a directory tree.
 
 `--option` values accept strings, decimal integers, hexadecimal integers such as `0x901`, and booleans.
 
+Mirror of Fate HD repacks are selected automatically when `--output` ends in `.pack` and no BFPK `layout` or `archive_version` option is supplied. BFPK repacks use the options below.
+
 ## Repack Options
 
 | Option | Description |
@@ -148,5 +223,8 @@ Builds an archive from a directory tree.
 | `file_chunk_size` | Positive chunk size used by chunked compressed archive versions. |
 | `trailing_padding` | Non-negative number of padding bytes to append after archive data. |
 | `compression_level` | zlib compression level for zlib-based repacks. Defaults to Python's zlib default. |
+| `pack_size` | Mirror of Fate HD `.pack` payload-area size validation value. MercuryKit computes this during repack and fails if a supplied value does not match. |
 
 Encrypted picture archive repacks preserve `opaque_hash` metadata for unchanged files when manifest metadata is available. New or changed entries receive a deterministic value; MercuryKit does not validate that field as a CRC.
+
+Mirror of Fate HD repacks compute the `.pack` header fields automatically. The optional `pack_size` value is only a validation check; it is not required for normal repacks.

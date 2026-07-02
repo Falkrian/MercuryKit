@@ -8,6 +8,7 @@ import sys
 
 from mercurykit.archive import ArchiveContext, ArchiveEntry, UnsupportedOperation
 from mercurykit.bfpk import BfpkEngine
+from mercurykit.mirror_of_fate import MirrorOfFatePackEngine
 from mercurykit.progress import NullProgressReporter, ProgressReporter, ProgressWriter, TerminalProgressReporter
 from mercurykit.scanner import ArchiveScanner, NoArchiveError
 from mercurykit.security import UnsafeArchivePathError, safe_output_path
@@ -24,18 +25,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mercurykit")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    scan_parser = subparsers.add_parser("scan", help="Scan BFPK archive files")
+    scan_parser = subparsers.add_parser("scan", help="Scan archive files")
     scan_parser.add_argument("paths", nargs="+", type=Path)
     scan_parser.add_argument("--verbose", action="store_true")
     scan_parser.add_argument("-r", "--recursive", action="store_true")
 
-    unpack_parser = subparsers.add_parser("unpack", help="Unpack BFPK archive files")
+    unpack_parser = subparsers.add_parser("unpack", help="Unpack archive files")
     unpack_parser.add_argument("files", nargs="+", type=Path)
     unpack_parser.add_argument("--dest", type=Path)
     unpack_parser.add_argument("--overwrite", action="store_true")
     _add_progress_args(unpack_parser)
 
-    repack_parser = subparsers.add_parser("repack", help="Repack a directory into a BFPK archive")
+    repack_parser = subparsers.add_parser("repack", help="Repack a directory into an archive")
     repack_parser.add_argument("source_dir", type=Path)
     repack_parser.add_argument("--output", required=True, type=Path)
     repack_parser.add_argument("--option", action="append", default=[], metavar="KEY=VALUE")
@@ -53,8 +54,9 @@ def _add_progress_args(parser: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    engine = BfpkEngine()
-    scanner = ArchiveScanner(engine)
+    bfpk_engine = BfpkEngine()
+    mirror_of_fate_engine = MirrorOfFatePackEngine()
+    scanner = ArchiveScanner((bfpk_engine, mirror_of_fate_engine))
 
     try:
         if args.command == "scan":
@@ -62,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "unpack":
             return _unpack(args, scanner)
         if args.command == "repack":
-            return _repack(args, engine)
+            return _repack(args, bfpk_engine, mirror_of_fate_engine)
     except (
         NoArchiveError,
         UnsafeArchivePathError,
@@ -221,6 +223,13 @@ def _extract_context(
             progress.advance(items=1, detail=entry.path or destination.name)
     finally:
         progress.finish()
+    _write_unpacked_metadata(context, output_root, entries)
+
+
+def _write_unpacked_metadata(context: ArchiveContext, output_root: Path, entries: list[ArchiveEntry]) -> None:
+    writer = getattr(context.engine, "write_unpacked_metadata", None)
+    if callable(writer):
+        writer(context, output_root, entries)
 
 
 def _entries_total_uncompressed_size(entries: list[ArchiveEntry]) -> int | None:
@@ -282,9 +291,22 @@ def _parse_archive_option_value(value: str) -> object:
         return value
 
 
-def _repack(args: argparse.Namespace, engine: BfpkEngine) -> int:
+def _repack(args: argparse.Namespace, bfpk_engine: BfpkEngine, mirror_of_fate_engine: MirrorOfFatePackEngine) -> int:
     if not args.source_dir.is_dir():
         raise FileNotFoundError(f"Source directory does not exist: {args.source_dir}")
-    engine.repack_with_progress(args.source_dir, args.output, _parse_archive_options(args.option), _progress_reporter(args))
+    options = _parse_archive_options(args.option)
+    engine = _repack_engine(args.output, options, bfpk_engine, mirror_of_fate_engine)
+    engine.repack_with_progress(args.source_dir, args.output, options, _progress_reporter(args))
     print(f"{args.source_dir}: repacked to {args.output}")
     return 0
+
+
+def _repack_engine(
+    output_path: Path,
+    options: dict[str, object],
+    bfpk_engine: BfpkEngine,
+    mirror_of_fate_engine: MirrorOfFatePackEngine,
+) -> BfpkEngine | MirrorOfFatePackEngine:
+    if output_path.suffix.lower() == ".pack" and "archive_version" not in options and "layout" not in options:
+        return mirror_of_fate_engine
+    return bfpk_engine
