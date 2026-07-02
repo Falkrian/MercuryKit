@@ -3,6 +3,7 @@
 # MercuryKit
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](https://opensource.org/licenses/MIT)
+[![PyPI](https://img.shields.io/pypi/v/mercurykit?style=flat&label=PyPI&color=red)](https://pypi.org/project/mercurykit/)
 [![Twitter](https://img.shields.io/twitter/follow/FalkrianTTV?label=%40FalkrianTTV)](https://twitter.com/FalkrianTTV)
 
 [**Overview**](https://github.com/Falkrian/MercuryKit#overview)
