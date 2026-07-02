@@ -44,13 +44,25 @@ Blades of Fire `0x901` JPG entries are currently extracted as their original pac
 
 MercuryKit requires Python 3.11 or newer.
 
+Install the latest release from [MercuryKit on PyPI](https://pypi.org/project/mercurykit/):
+
+```powershell
+python -m pip install mercurykit
+```
+
+Install optional LZ4 support from PyPI when working with archive versions that use LZ4-block compression:
+
+```powershell
+python -m pip install "mercurykit[lz4]"
+```
+
 For local development or direct use from this checkout:
 
 ```powershell
 python -m pip install -e .
 ```
 
-Install optional LZ4 support when working with archive versions that use LZ4-block compression:
+Local editable installs can include optional extras:
 
 ```powershell
 python -m pip install -e ".[lz4]"
