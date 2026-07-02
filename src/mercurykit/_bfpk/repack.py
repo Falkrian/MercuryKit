@@ -35,6 +35,9 @@ class BfpkRepackMixin:
         if layout == self.lords_of_shadow_ultimate_layout:
             self._repack_lords_of_shadow_ultimate(input_dir, output_path, options, progress)
             return
+        if layout == self.scrapland_layout:
+            self._repack_scrapland(input_dir, output_path, options, progress)
+            return
         self._repack_legacy(input_dir, output_path, options, progress)
 
     def _repack_legacy(
@@ -451,6 +454,82 @@ class BfpkRepackMixin:
         progress.advance(bytes_count=len(data))
         return 4 + len(payload)
 
+    def _repack_scrapland(
+        self,
+        input_dir: Path,
+        output_path: Path,
+        options: dict[str, object],
+        progress: ProgressReporter,
+    ) -> None:
+        unsupported_options = set(options) - {"layout", "archive_version"}
+        if unsupported_options:
+            unsupported = ", ".join(sorted(unsupported_options))
+            raise ValueError(f"BFPK Scrapland option is not supported: {unsupported}")
+        archive_version = self._int_option(options, "archive_version", self.scrapland_archive_version)
+        if archive_version != self.scrapland_archive_version:
+            raise UnsupportedOperation("BFPK Scrapland repack supports only archive_version=0")
+
+        input_dir = input_dir.resolve()
+        output_path = output_path.resolve()
+        self._validate_repack_paths(input_dir, output_path)
+
+        files = self._collect_repack_files(input_dir)
+        self._check_u32(len(files), "BFPK Scrapland file count")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        repack_files = self._prepare_repack_files(
+            input_dir,
+            files,
+            output_path.name,
+            compute_hash=False,
+            include_total_bytes=True,
+            path_encoding=self.scrapland_path_encoding,
+            progress=progress,
+        )
+        self._validate_scrapland_repack_paths(repack_files)
+
+        table_size = sum(4 + len(file.encoded_path) + 4 + 4 for file in repack_files)
+        current_offset = 12 + table_size
+        payload_offsets: list[int] = []
+        for repack_file in repack_files:
+            self._check_u32(current_offset, f"BFPK Scrapland payload offset for {repack_file.path}")
+            payload_offsets.append(current_offset)
+            current_offset += repack_file.uncompressed_size
+        self._check_u32(current_offset, "BFPK Scrapland archive size")
+
+        progress.start(
+            f"Repacking {output_path.name}",
+            total_items=len(repack_files),
+            total_bytes=sum(file.uncompressed_size for file in repack_files),
+        )
+        with output_path.open("w+b") as output:
+            try:
+                output.write(self.archive_magic)
+                output.write(struct.pack("<I", self.scrapland_archive_version))
+                output.write(struct.pack("<I", len(repack_files)))
+                for repack_file, payload_offset in zip(repack_files, payload_offsets):
+                    output.write(struct.pack("<I", len(repack_file.encoded_path)))
+                    output.write(repack_file.encoded_path)
+                    output.write(struct.pack("<I", repack_file.uncompressed_size))
+                    output.write(struct.pack("<I", payload_offset))
+
+                if output.tell() != (payload_offsets[0] if payload_offsets else 12):
+                    raise ValueError("BFPK Scrapland repack offset calculation drifted")
+
+                for repack_file in repack_files:
+                    self._write_raw_payload(output, repack_file.source_path, progress)
+                    progress.advance(items=1, detail=repack_file.path)
+            finally:
+                progress.finish()
+
+    def _validate_scrapland_repack_paths(self, repack_files: list[BfpkRepackFile]) -> None:
+        seen_paths: set[str] = set()
+        for repack_file in repack_files:
+            key = repack_file.path.casefold()
+            if key in seen_paths:
+                raise ValueError(f"BFPK Scrapland duplicate source path: {repack_file.path}")
+            seen_paths.add(key)
+
     def _repack_encrypted_picture_archive(
         self,
         input_dir: Path,
@@ -587,12 +666,16 @@ class BfpkRepackMixin:
         file: Path,
         *,
         compute_hash: bool,
+        path_encoding: str = "utf-8",
         progress: ProgressReporter,
     ) -> BfpkRepackFile:
         relative_path = file.relative_to(input_dir).as_posix()
         if not self._is_safe_archive_path(relative_path):
             raise ValueError(f"BFPK source path is unsafe: {relative_path}")
-        encoded_path = relative_path.encode("utf-8")
+        try:
+            encoded_path = relative_path.encode(path_encoding)
+        except UnicodeEncodeError as exc:
+            raise ValueError(f"BFPK source path cannot be encoded as {path_encoding}: {relative_path}") from exc
         self._check_u32(len(encoded_path), f"BFPK path length for {relative_path}")
         uncompressed_size = file.stat().st_size
         self._check_u32(uncompressed_size, f"BFPK uncompressed size for {relative_path}")
@@ -608,12 +691,16 @@ class BfpkRepackMixin:
         *,
         compute_hash: bool,
         include_total_bytes: bool,
+        path_encoding: str = "utf-8",
         progress: ProgressReporter,
     ) -> list[BfpkRepackFile]:
         total_bytes = sum(file.stat().st_size for file in files) if include_total_bytes else None
         progress.start(f"Preparing {output_name}", total_items=len(files), total_bytes=total_bytes)
         try:
-            return [self._repack_file(input_dir, file, compute_hash=compute_hash, progress=progress) for file in files]
+            return [
+                self._repack_file(input_dir, file, compute_hash=compute_hash, path_encoding=path_encoding, progress=progress)
+                for file in files
+            ]
         finally:
             progress.finish()
 
@@ -878,6 +965,8 @@ class BfpkRepackMixin:
             "castlevania_lords_of_shadow_ultimate_edition",
         }:
             return self.lords_of_shadow_ultimate_layout
+        if layout in {"scrapland", "scrapland_remastered"}:
+            return self.scrapland_layout
         raise ValueError(f"BFPK layout is not supported: {raw_layout}")
 
     def _required_int_option(self, options: dict[str, object], key: str) -> int:

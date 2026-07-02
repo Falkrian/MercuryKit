@@ -24,6 +24,9 @@ class BfpkEngine(BfpkManifestMixin, BfpkExtractionMixin, BfpkRepackMixin, BfpkCo
     blades_of_fire_layout = "blades_of_fire"
     spacelords_layout = "spacelords"
     lords_of_shadow_ultimate_layout = "lords_of_shadow_ultimate"
+    scrapland_layout = "scrapland"
+    scrapland_archive_version = 0x0
+    scrapland_path_encoding = "cp1252"
     legacy_archive_versions = frozenset({0x100, 0x101, 0x102})
     blades_of_fire_archive_versions = frozenset({0x100, 0x102, 0x300})
     spacelords_archive_versions = frozenset({0x500, 0x502})
@@ -68,6 +71,9 @@ class BfpkEngine(BfpkManifestMixin, BfpkExtractionMixin, BfpkRepackMixin, BfpkCo
 
     def _supports_legacy_layout(self, archive_version: int) -> bool:
         return archive_version in self.legacy_archive_versions
+
+    def _supports_scrapland_layout(self, archive_version: int) -> bool:
+        return archive_version == self.scrapland_archive_version
 
     def _supports_lords_of_shadow_ultimate_layout(self, archive_version: int) -> bool:
         return archive_version in self.lords_of_shadow_ultimate_archive_versions

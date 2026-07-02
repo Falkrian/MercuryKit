@@ -31,6 +31,7 @@ MercuryKit is a Python package and command line toolkit for working with Mercury
 
 | Game | Support | Support Comment |
 | --- | --- | --- |
+| Scrapland Remastered | Full | Supports raw `.packed` archives using BFPK version `0`, including scan, unpack, and directory-based repack with `cp1252` path encoding. |
 | Castlevania: Lords of Shadow - Ultimate Edition | Full | Supports Steam `.dat` archives using AES-256-CBC encrypted file tables, including raw `0x2` and zlib-record `0x3` variants. |
 | Castlevania: Lords of Shadow 2 | Full | Supports archive versions `0x100`, `0x101`, and `0x102`, including raw, zlib, and chunked zlib variants. |
 | Castlevania Lords of Shadow - Mirror of Fate HD | Full | Supports `.pack` archives, including scan, unpack, directory-based repack, computed header fields, and automatic `system/files.toc` updates. |
@@ -56,6 +57,28 @@ python -m pip install -e ".[lz4]"
 ```
 
 ## Quick Start
+
+### Scrapland Remastered
+
+Scan:
+
+```powershell
+mercurykit scan "D:\Steam\steamapps\common\Scrapland\data.packed" --verbose
+```
+
+Unpack:
+
+```powershell
+mercurykit unpack "D:\Steam\steamapps\common\Scrapland\data.packed" --dest ".\Output\scrapland-data"
+```
+
+Repack:
+
+```powershell
+mercurykit repack ".\Output\scrapland-data" --output ".\data.repacked.packed" --option layout=scrapland
+```
+
+Scrapland `.packed` archives are raw containers. MercuryKit recalculates the table offsets during repack and writes paths using Windows-compatible `cp1252` encoding.
 
 ### Castlevania: Lords of Shadow - Ultimate Edition
 
@@ -239,14 +262,14 @@ Builds an archive from a directory tree.
 
 `--option` values accept strings, decimal integers, hexadecimal integers such as `0x901`, and booleans.
 
-Mirror of Fate HD repacks are selected automatically when `--output` ends in `.pack` and no BFPK `layout` or `archive_version` option is supplied. Castlevania: Lords of Shadow - Ultimate Edition `.dat` repacks use `layout=lords_of_shadow_ultimate` with `archive_version=0x2` or `archive_version=0x3`. Other BFPK repacks use the options below.
+Mirror of Fate HD repacks are selected automatically when `--output` ends in `.pack` and no BFPK `layout` or `archive_version` option is supplied. Scrapland Remastered `.packed` repacks use `layout=scrapland`. Castlevania: Lords of Shadow - Ultimate Edition `.dat` repacks use `layout=lords_of_shadow_ultimate` with `archive_version=0x2` or `archive_version=0x3`. Other BFPK repacks use the options below.
 
 ## Repack Options
 
 | Option | Description |
 | --- | --- |
-| `archive_version` | Required archive version, such as `0x2`, `0x3`, `0x100`, `0x102`, `0x500`, `0x502`, `0x901`, or `0xd01`. |
-| `layout` | Archive layout. Supported values include `legacy`, `lords_of_shadow_ultimate`, `blades_of_fire`, and `spacelords`. Defaults to `legacy`. |
+| `archive_version` | Required for most BFPK repacks, or optional validation for Scrapland. Examples include `0`, `0x2`, `0x3`, `0x100`, `0x102`, `0x500`, `0x502`, `0x901`, and `0xd01`. |
+| `layout` | Archive layout. Supported values include `scrapland`, `legacy`, `lords_of_shadow_ultimate`, `blades_of_fire`, and `spacelords`. Defaults to `legacy`. |
 | `file_chunk_size` | Positive chunk size used by chunked compressed archive versions. |
 | `trailing_padding` | Non-negative number of padding bytes to append after archive data. |
 | `compression_level` | zlib compression level for zlib-based repacks. Defaults to Python's zlib default. |
@@ -257,3 +280,5 @@ Encrypted picture archive repacks preserve `opaque_hash` metadata for unchanged 
 Mirror of Fate HD repacks compute the `.pack` header fields automatically. The optional `pack_size` value is only a validation check; it is not required for normal repacks.
 
 Castlevania: Lords of Shadow - Ultimate Edition `.dat` archives use AES-256-CBC encrypted file tables. MercuryKit decrypts those tables for scanning and unpacking, and writes new encrypted tables during repack.
+
+Scrapland Remastered `.packed` repacks do not use compression, trailing padding, or sidecar metadata. Use `layout=scrapland`; `archive_version=0` may be supplied as a validation check.

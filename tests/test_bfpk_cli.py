@@ -410,6 +410,30 @@ def _build_lords_of_shadow_ultimate_dat_archive(
     path.write_bytes(bytes(archive))
 
 
+def _build_scrapland_packed_archive(path: Path, files: list[tuple[str, bytes]]) -> None:
+    table_size = sum(4 + len(name.encode("cp1252")) + 4 + 4 for name, _ in files)
+    current_offset = 12 + table_size
+    table = bytearray()
+    payloads: list[bytes] = []
+
+    for name, data in files:
+        encoded_name = name.encode("cp1252")
+        table += len(encoded_name).to_bytes(4, "little")
+        table += encoded_name
+        table += len(data).to_bytes(4, "little")
+        table += current_offset.to_bytes(4, "little")
+        payloads.append(data)
+        current_offset += len(data)
+
+    archive = bytearray()
+    archive += b"BFPK"
+    archive += (0).to_bytes(4, "little")
+    archive += len(files).to_bytes(4, "little")
+    archive += table
+    archive += b"".join(payloads)
+    path.write_bytes(bytes(archive))
+
+
 def _build_mirror_of_fate_pack(
     path: Path,
     files: list[tuple[str, bytes]],
@@ -989,6 +1013,149 @@ def test_lords_of_shadow_ultimate_real_archives_when_available(tmp_path: Path) -
             output = BytesIO()
             engine.extract_entry(context, entry, output)
             assert len(output.getvalue()) == entry.uncompressed_size
+
+
+def test_scrapland_manifest_extract_and_cp1252_paths(tmp_path: Path) -> None:
+    archive = tmp_path / "data00.packed"
+    files = [
+        ("m3d.ini", b"[video]\r\nVSync = 1\r\n"),
+        ("models/misc/viscoson/dds/viscosónbody-r.dds", b"DDS " + b"x" * 16),
+    ]
+    _build_scrapland_packed_archive(archive, files)
+
+    outcome = ArchiveScanner().require_archive(archive, read_manifest=True)
+
+    assert outcome.selected is not None
+    assert outcome.selected.reason == "BFPK scrapland layout matched"
+    assert outcome.info is not None
+    assert outcome.info.metadata["archive_version"] == 0
+    assert outcome.info.metadata["table_format"] == "scrapland"
+    entries = outcome.info.metadata["entries"]
+    assert [entry.path for entry in entries] == [name for name, _ in files]
+    assert entries[1].metadata["path_encoding"] == "cp1252"
+    assert entries[0].offset == 12 + sum(4 + len(name.encode("cp1252")) + 4 + 4 for name, _ in files)
+    assert _extract_all(archive) == dict(files)
+
+
+def test_scrapland_rejects_malformed_rows_paths_duplicates_and_payload_ranges(tmp_path: Path) -> None:
+    valid = tmp_path / "valid.packed"
+    _build_scrapland_packed_archive(valid, [("a.bin", b"aa"), ("b.bin", b"bbb")])
+
+    bad_version = tmp_path / "bad_version.packed"
+    bad_version.write_bytes(valid.read_bytes())
+    data = bytearray(bad_version.read_bytes())
+    data[4:8] = (1).to_bytes(4, "little")
+    bad_version.write_bytes(data)
+    assert ArchiveScanner().scan(bad_version, read_manifest=True).selected is None
+
+    malformed_row = tmp_path / "malformed_row.packed"
+    malformed_row.write_bytes(b"BFPK" + (0).to_bytes(4, "little") + (1).to_bytes(4, "little") + (4097).to_bytes(4, "little"))
+    assert ArchiveScanner().scan(malformed_row, read_manifest=True).selected is None
+
+    unsafe = tmp_path / "unsafe.packed"
+    _build_scrapland_packed_archive(unsafe, [("../escape.bin", b"payload")])
+    assert ArchiveScanner().scan(unsafe, read_manifest=True).selected is None
+
+    duplicate = tmp_path / "duplicate.packed"
+    _build_scrapland_packed_archive(duplicate, [("file.bin", b"a"), ("FILE.bin", b"b")])
+    assert ArchiveScanner().scan(duplicate, read_manifest=True).selected is None
+
+    first_offset_mismatch = tmp_path / "first_offset_mismatch.packed"
+    first_offset_mismatch.write_bytes(valid.read_bytes())
+    data = bytearray(first_offset_mismatch.read_bytes())
+    first_offset_field = 12 + 4 + len("a.bin".encode("cp1252")) + 4
+    data[first_offset_field : first_offset_field + 4] = (999).to_bytes(4, "little")
+    first_offset_mismatch.write_bytes(data)
+    assert ArchiveScanner().scan(first_offset_mismatch, read_manifest=True).selected is None
+
+    non_contiguous = tmp_path / "non_contiguous.packed"
+    non_contiguous.write_bytes(valid.read_bytes() + b"\x00")
+    assert ArchiveScanner().scan(non_contiguous, read_manifest=True).selected is None
+
+    beyond_eof = tmp_path / "beyond_eof.packed"
+    beyond_eof.write_bytes(valid.read_bytes()[:-1])
+    assert ArchiveScanner().scan(beyond_eof, read_manifest=True).selected is None
+
+
+def test_scrapland_repack_round_trip_sorted_paths_and_offsets(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    files = {
+        "z/last.bin": b"last",
+        "a/first.bin": b"first",
+        "models/misc/viscosón.dds": b"DDS " + b"payload",
+    }
+    _write_source_files(source, files)
+    archive = tmp_path / "data.repacked.packed"
+
+    BfpkEngine().repack(source, archive, {"layout": "scrapland", "archive_version": 0})
+
+    context = BfpkEngine().open(archive)
+    entries = tuple(BfpkEngine().iter_entries(context))
+    assert [entry.path for entry in entries] == sorted(files)
+    assert _extract_all(archive) == files
+    assert entries[0].offset == 12 + sum(4 + len(name.encode("cp1252")) + 4 + 4 for name in sorted(files))
+    for index, entry in enumerate(entries):
+        expected_next = entries[index + 1].offset if index + 1 < len(entries) else archive.stat().st_size
+        assert entry.offset is not None
+        assert entry.uncompressed_size is not None
+        assert entry.offset + entry.uncompressed_size == expected_next
+
+
+def test_scrapland_repack_rejects_options_bad_version_and_unencodable_paths(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    _write_source_files(source, {"file.bin": b"payload"})
+    engine = BfpkEngine()
+
+    with pytest.raises(UnsupportedOperation, match="archive_version=0"):
+        engine.repack(source, tmp_path / "bad_version.packed", {"layout": "scrapland", "archive_version": 1})
+    with pytest.raises(ValueError, match="option is not supported"):
+        engine.repack(source, tmp_path / "bad_option.packed", {"layout": "scrapland", "trailing_padding": 1})
+
+    unencodable = tmp_path / "unencodable"
+    unencodable.mkdir()
+    _write_source_files(unencodable, {"emoji/😀.bin": b"payload"})
+    with pytest.raises(ValueError, match="cannot be encoded as cp1252"):
+        engine.repack(unencodable, tmp_path / "unencodable.packed", {"layout": "scrapland"})
+
+
+def test_scrapland_real_archives_when_available(tmp_path: Path) -> None:
+    root = Path(r"D:\Steam\steamapps\common\Scrapland")
+    cases = [
+        ("data.packed", 2730),
+        ("data00.packed", 3185),
+        ("data01.packed", 1473),
+        ("data02.packed", 1042),
+        ("data03.packed", 849),
+        ("English.packed", 1885),
+        ("French.packed", 1892),
+        ("German.packed", 1892),
+        ("Russian.packed", 1893),
+        ("Spanish.packed", 1892),
+    ]
+    if not all((root / name).is_file() for name, _ in cases):
+        pytest.skip("Scrapland Remastered Steam archives are not available")
+
+    engine = BfpkEngine()
+    for name, entry_count in cases:
+        archive = root / name
+        outcome = ArchiveScanner().require_archive(archive, read_manifest=True)
+        assert outcome.info is not None
+        assert outcome.info.metadata["table_format"] == "scrapland"
+        assert outcome.info.metadata["archive_version"] == 0
+        assert outcome.info.entry_count == entry_count
+
+        context = engine.open(archive)
+        entries = tuple(engine.iter_entries(context))
+        for entry in (entries[0], entries[len(entries) // 2], entries[-1]):
+            output = BytesIO()
+            engine.extract_entry(context, entry, output)
+            assert isinstance(entry.offset, int)
+            assert isinstance(entry.stored_size, int)
+            with archive.open("rb") as file:
+                file.seek(entry.offset)
+                assert output.getvalue() == file.read(entry.stored_size)
 
 
 def test_malformed_archives_do_not_match(tmp_path: Path) -> None:

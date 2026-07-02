@@ -97,6 +97,8 @@ class BfpkManifestMixin:
 
     def _candidate_layouts(self, archive_version: int) -> tuple[str, ...]:
         layouts: list[str] = []
+        if self._supports_scrapland_layout(archive_version):
+            layouts.append(self.scrapland_layout)
         if self._supports_legacy_layout(archive_version):
             layouts.append(self.legacy_layout)
         if self._supports_lords_of_shadow_ultimate_layout(archive_version):
@@ -123,6 +125,8 @@ class BfpkManifestMixin:
             if layout != self.lords_of_shadow_ultimate_layout:
                 raise ValueError("BFPK Lords of Shadow Ultimate Edition archive does not use this table layout")
             return self._read_lords_of_shadow_ultimate_file_records(reader, header, file_size)
+        if layout == self.scrapland_layout:
+            return self._read_scrapland_file_records(reader, header, file_size)
         return self._read_file_records(reader, header, file_size, layout)
 
     def _read_file_records(
@@ -197,6 +201,40 @@ class BfpkManifestMixin:
         file_offset = reader.u32()
         return BfpkFileRecord(file_name, file_uncompressed_size, file_offset)
 
+    def _read_scrapland_file_records(
+        self,
+        reader: BinaryReader,
+        header: BfpkHeader,
+        file_size: int,
+    ) -> tuple[BfpkFileRecord, ...]:
+        if header.file_count > self.max_u32:
+            raise ValueError("BFPK file count is too large")
+
+        reader.seek(header.table_offset)
+        records = []
+        seen_paths: set[str] = set()
+        for _ in range(header.file_count):
+            record = self._read_scrapland_file_record(reader)
+            path_key = record.path.casefold()
+            if path_key in seen_paths:
+                raise ValueError(f"BFPK Scrapland duplicate file path: {record.path!r}")
+            seen_paths.add(path_key)
+            records.append(record)
+        self._validate_records(records, header, file_size, self.scrapland_layout)
+        return tuple(records)
+
+    def _read_scrapland_file_record(self, reader: BinaryReader) -> BfpkFileRecord:
+        file_name_length = reader.u32()
+        if file_name_length == 0 or file_name_length > 4096:
+            raise ValueError("BFPK file name length is invalid")
+        file_name = reader.read_exact(file_name_length).decode(self.scrapland_path_encoding)
+        if not self._is_safe_archive_path(file_name):
+            raise ValueError(f"BFPK file path is unsafe: {file_name!r}")
+
+        file_uncompressed_size = reader.u32()
+        file_offset = reader.u32()
+        return BfpkFileRecord(file_name, file_uncompressed_size, file_offset)
+
     def _validate_lords_of_shadow_ultimate_table_padding(self, reader: BinaryReader) -> None:
         # The shipping archives carry AES block padding after the final row. The
         # game does not read those bytes, so MercuryKit only requires that row
@@ -258,6 +296,8 @@ class BfpkManifestMixin:
         layout: str,
     ) -> None:
         if not records:
+            if layout == self.scrapland_layout:
+                self._validate_scrapland_payload_bounds(records, header, file_size)
             return
 
         table_end = self._table_end_offset(records, header, layout)
@@ -274,6 +314,9 @@ class BfpkManifestMixin:
 
     def _table_end_offset(self, records: list[BfpkFileRecord], header: BfpkHeader, layout: str) -> int:
         row_size = sum(4 + len(record.path.encode("utf-8")) + 4 + 8 for record in records)
+        if layout == self.scrapland_layout:
+            row_size = sum(4 + len(record.path.encode(self.scrapland_path_encoding)) + 4 + 4 for record in records)
+            return header.table_offset + row_size
         if layout == self.lords_of_shadow_ultimate_layout:
             if header.encrypted_table_size is None:
                 raise ValueError("BFPK Lords of Shadow Ultimate Edition table size is missing")
@@ -316,6 +359,11 @@ class BfpkManifestMixin:
                 raise ValueError("BFPK Lords of Shadow Ultimate Edition payload offsets are not monotonic")
             return record.offset
 
+        if layout == self.scrapland_layout:
+            if record.offset < previous_offset:
+                raise ValueError("BFPK Scrapland payload offsets are not monotonic")
+            return record.offset
+
         return previous_offset
 
     def _validate_encrypted_picture_record_metadata(self, record: BfpkFileRecord, label: str) -> None:
@@ -333,6 +381,8 @@ class BfpkManifestMixin:
     ) -> None:
         if layout == self.blades_of_fire_layout and header.archive_version in {0x100, 0x300}:
             self._validate_raw_payload_bounds(records, file_size, "BFPK raw")
+        elif layout == self.scrapland_layout:
+            self._validate_scrapland_payload_bounds(records, header, file_size)
         elif layout == self.lords_of_shadow_ultimate_layout and header.archive_version == 0x2:
             self._validate_raw_payload_bounds(records, file_size, "BFPK Lords of Shadow Ultimate Edition raw")
         elif layout == self.lords_of_shadow_ultimate_layout and header.archive_version == 0x3:
@@ -348,6 +398,29 @@ class BfpkManifestMixin:
         for record in records:
             if record.offset + record.uncompressed_size > file_size:
                 raise ValueError(f"{label} payload extends beyond archive data")
+
+    def _validate_scrapland_payload_bounds(
+        self,
+        records: list[BfpkFileRecord],
+        header: BfpkHeader,
+        file_size: int,
+    ) -> None:
+        if not records:
+            if self._table_end_offset(records, header, self.scrapland_layout) != file_size:
+                raise ValueError("BFPK Scrapland empty archive has unexpected trailing data")
+            return
+
+        table_end = self._table_end_offset(records, header, self.scrapland_layout)
+        if records[0].offset != table_end:
+            raise ValueError("BFPK Scrapland first payload offset does not match the table end")
+
+        for index, record in enumerate(records):
+            payload_end = record.offset + record.uncompressed_size
+            if payload_end > file_size:
+                raise ValueError("BFPK Scrapland payload extends beyond archive data")
+            expected_next_offset = records[index + 1].offset if index + 1 < len(records) else file_size
+            if payload_end != expected_next_offset:
+                raise ValueError("BFPK Scrapland payloads are not contiguous")
 
     def _validate_encrypted_picture_bounds(
         self,
@@ -506,6 +579,9 @@ class BfpkManifestMixin:
                 return self._spacelords_502_entry(reader, record, file_chunk_size)
             raise UnsupportedOperation(f"BFPK Spacelords archive version 0x{archive_version:x} is not supported")
 
+        if layout == self.scrapland_layout:
+            return self._scrapland_entry(record)
+
         if layout == self.lords_of_shadow_ultimate_layout:
             return self._lords_of_shadow_ultimate_entry(reader, archive_version, record)
 
@@ -529,6 +605,20 @@ class BfpkManifestMixin:
                 raise ValueError("BFPK 0x102 archive does not define a file chunk size")
             return self._entry_for_102(reader, record, file_chunk_size)
         raise UnsupportedOperation(f"BFPK archive version 0x{archive_version:x} is not supported")
+
+    def _scrapland_entry(self, record: BfpkFileRecord) -> ArchiveEntry:
+        return ArchiveEntry(
+            path=record.path,
+            offset=record.offset,
+            uncompressed_size=record.uncompressed_size,
+            stored_size=record.uncompressed_size,
+            metadata={
+                "compressed": False,
+                "archive_version": self.scrapland_archive_version,
+                "table_format": self.scrapland_layout,
+                "path_encoding": self.scrapland_path_encoding,
+            },
+        )
 
     def _lords_of_shadow_ultimate_entry(
         self,
