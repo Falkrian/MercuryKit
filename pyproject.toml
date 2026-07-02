@@ -1,19 +1,41 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mercurykit"
 version = "0.1.0"
-description = "MercurySteam BFPK archive toolkit."
+description = "MercurySteam archive scanner, extractor, and repacker."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "MercuryKit Contributors" }]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["mercurysteam", "archive", "bfpk", "castlevania", "scrapland", "spacelords", "modding"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Games/Entertainment",
+    "Topic :: System :: Archiving",
+    "Topic :: Utilities",
+]
 dependencies = ["cryptography>=42"]
 
 [project.optional-dependencies]
 lz4 = ["lz4>=4.3"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "build>=1.2", "twine>=5", "readme-renderer[md]>=43"]
+
+[project.urls]
+Homepage = "https://github.com/Falkrian/MercuryKit"
+Repository = "https://github.com/Falkrian/MercuryKit"
+Issues = "https://github.com/Falkrian/MercuryKit/issues"
 
 [project.scripts]
 mercurykit = "mercurykit.cli:main"
