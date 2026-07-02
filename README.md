@@ -18,7 +18,7 @@ MercuryKit is a Python package and command line toolkit for working with Mercury
 - Show progress automatically on interactive terminals, with switches to force or suppress it.
 - Use MercuryKit from Python through the public `mercurykit` package.
 
-## Supported Games And Archive Families
+## Supported Games
 
 | Game | Support | Support Comment |
 | --- | --- | --- |
