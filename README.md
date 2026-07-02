@@ -5,6 +5,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](https://opensource.org/licenses/MIT)
 [![Twitter](https://img.shields.io/twitter/follow/FalkrianTTV?label=%40FalkrianTTV)](https://twitter.com/FalkrianTTV)
 
+[**Overview**](https://github.com/Falkrian/MercuryKit#overview)
+| [**Features**](https://github.com/Falkrian/MercuryKit/#features)
+| [**Supported Games**](https://github.com/Falkrian/MercuryKit/#supported-games)
+| [**Installation**](https://github.com/Falkrian/MercuryKit/#installation)
+| [**Quick Start**](https://github.com/Falkrian/MercuryKit#quick-start)
+| [**CLI Reference**](https://github.com/Falkrian/MercuryKit/#cli-reference)
+
+## Overview
+
 MercuryKit is a Python package and command line toolkit for working with MercurySteam archive files. It can scan archives, unpack their contents safely, and repack edited directory trees back into archive form for supported game layouts.
 
 ## Features
