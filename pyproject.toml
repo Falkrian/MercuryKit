@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mercurykit"
+version = "0.1.0"
+description = "MercurySteam BFPK archive toolkit."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "MercuryKit Contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+lz4 = ["lz4>=4.3"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+mercurykit = "mercurykit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
