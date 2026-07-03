@@ -23,6 +23,7 @@ MercuryKit is a Python package and command line toolkit for working with Mercury
 - Recursively scan directory trees and print verbose archive details when needed.
 - Print scan-generated repack guidance by default, including the required options recovered from each archive such as `layout`, `archive_version`, `file_chunk_size`, and safely inferred `trailing_padding`.
 - Unpack archives with path safety checks to avoid writing outside the destination directory.
+- Restore supported packed picture assets to viewer-ready files on request while keeping raw extraction as the default for repack workflows.
 - Repack extracted folders back into supported archive versions.
 - Preserve useful archive metadata, including encrypted picture archive table metadata.
 - Support raw, zlib-compressed, LZ4-block-compressed, AES-encrypted table, and encrypted picture archive layouts.
@@ -37,10 +38,10 @@ MercuryKit is a Python package and command line toolkit for working with Mercury
 | Castlevania: Lords of Shadow - Ultimate Edition | Full | Supports Steam `.dat` archives using AES-256-CBC encrypted file tables, including raw `0x2` and zlib-record `0x3` variants. |
 | Castlevania: Lords of Shadow 2 | Full | Supports archive versions `0x100`, `0x101`, and `0x102`, including raw, zlib, and chunked zlib variants. |
 | Castlevania Lords of Shadow - Mirror of Fate HD | Full | Supports `.pack` archives, including scan, unpack, directory-based repack, computed header fields, and automatic `system/files.toc` updates. |
-| Blades of Fire | Full* | Supports archive versions `0x100`, `0x102`, `0x300`, and encrypted `Pics.packed` archives using `0x901`. JPG entries are preserved as packed payloads until the viewer-ready restoration transform is implemented. |
-| Spacelords | Full | Supports archive versions `0x500`, `0x502`, and encrypted `Pics.packed` archives using `0xD01`, including LZ4-block variants. |
+| Blades of Fire | Full* | Supports archive versions `0x100`, `0x102`, `0x300`, and encrypted `Pics.packed` archives using `0x901`, including optional viewer-ready DDS/GIF/PNG/JPG restore during unpack. |
+| Spacelords | Full | Supports archive versions `0x500`, `0x502`, and encrypted `Pics.packed` archives using `0xD01`, including LZ4-block variants and optional viewer-ready DDS/GIF/TGA restore during unpack. |
 
-Blades of Fire `0x901` JPG entries are currently extracted as their original packed payloads. They are preserved for archive round trips, but the viewer-ready JPG restoration transform is still being researched.
+Blades of Fire `0x901` picture archives unpack raw packed payloads by default for archive round trips. Use `--restore-textures` when you want viewer-ready DDS, GIF, PNG, or JPG output.
 
 ## Installation
 
@@ -195,6 +196,12 @@ Repack encrypted picture archives with the picture layout version:
 mercurykit repack ".\Output\blades-pics" --output ".\Pics.repacked.packed" --option layout=blades_of_fire --option archive_version=0x901
 ```
 
+Unpack `Pics.packed` with verified viewer-ready restoration for DDS, GIF, PNG, and JPG picture assets:
+
+```powershell
+mercurykit unpack "D:\Steam\steamapps\common\Blades of Fire\Pics.packed" --dest ".\Output\blades-pics-restored" --restore-textures
+```
+
 Encrypted picture archives do not need a `trailing_padding` option in the scan-generated command.
 
 ### Spacelords
@@ -210,6 +217,14 @@ Unpack:
 ```powershell
 mercurykit unpack "D:\Steam\steamapps\common\Spacelords\Data00.packed" --dest ".\Output\spacelords-data"
 ```
+
+Unpack `Pics.packed` as viewer-ready picture assets:
+
+```powershell
+mercurykit unpack "D:\Steam\steamapps\common\Spacelords\Pics.packed" --dest ".\Output\spacelords-pics-restored" --restore-textures
+```
+
+Raw extraction remains the default and is the safest source for repacking `Pics.packed`.
 
 Repack:
 
@@ -253,7 +268,7 @@ Use the scan-generated repack guidance as the safest starting point for repackin
 ### `mercurykit unpack`
 
 ```text
-mercurykit unpack FILE... [--dest PATH] [--overwrite] [--progress | --no-progress]
+mercurykit unpack FILE... [--dest PATH] [--overwrite] [--restore-textures] [--progress | --no-progress]
 ```
 
 Extracts one or more supported archives.
@@ -263,10 +278,14 @@ Extracts one or more supported archives.
 | `FILE...` | One or more archive files to unpack. |
 | `--dest PATH` | Destination directory for extracted files. |
 | `--overwrite` | Replace existing files in the destination. |
+| `--restore-textures` | Restore supported packed texture payloads to viewer-ready files. Currently applies to Spacelords `0xD01` DDS/GIF/TGA entries and Blades of Fire `0x901` DDS/GIF/PNG/JPG entries. |
 | `--progress` | Show progress even when stderr is not interactive. |
 | `--no-progress` | Suppress progress output. |
 
 When `--dest` is omitted, MercuryKit uses the command's default extraction behavior for the selected input.
+
+For Spacelords `Pics.packed`, default unpack writes the raw packed picture payloads used for repacking. Add `--restore-textures` when you want standard DDS, GIF, or TGA files for viewing or editing outside the archive workflow.
+For Blades of Fire `Pics.packed`, default unpack writes the raw packed picture payloads used for repacking. Add `--restore-textures` when you want standard DDS, GIF, PNG, or JPG files for viewing or editing outside the archive workflow.
 
 ### `mercurykit repack`
 

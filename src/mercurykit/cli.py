@@ -34,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     unpack_parser.add_argument("files", nargs="+", type=Path)
     unpack_parser.add_argument("--dest", type=Path)
     unpack_parser.add_argument("--overwrite", action="store_true")
+    unpack_parser.add_argument(
+        "--restore-textures",
+        action="store_true",
+        help="Restore known packed texture payloads to viewer-ready files when supported",
+    )
     _add_progress_args(unpack_parser)
 
     repack_parser = subparsers.add_parser("repack", help="Repack a directory into an archive")
@@ -275,7 +280,13 @@ def _unpack(args: argparse.Namespace, scanner: ArchiveScanner) -> int:
         context = outcome.engine.open(file)
         output_root = _output_root(args.dest, file, multiple=len(args.files) > 1)
         progress = _progress_reporter(args)
-        _extract_context(context, output_root, overwrite=args.overwrite, progress=progress)
+        _extract_context(
+            context,
+            output_root,
+            overwrite=args.overwrite,
+            progress=progress,
+            restore_textures=args.restore_textures,
+        )
         print(f"{file}: extracted to {output_root}")
     return 0
 
@@ -299,6 +310,7 @@ def _extract_context(
     *,
     overwrite: bool,
     progress: ProgressReporter | None = None,
+    restore_textures: bool = False,
 ) -> None:
     progress = progress or NullProgressReporter()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -320,11 +332,20 @@ def _extract_context(
                 raise FileExistsError(f"Refusing to overwrite existing file: {destination}")
             destination.parent.mkdir(parents=True, exist_ok=True)
             with destination.open("wb") as output:
-                context.engine.extract_entry(context, entry, ProgressWriter(output, progress))
+                writer = ProgressWriter(output, progress)
+                if restore_textures and _try_extract_restored_entry(context, entry, writer):
+                    pass
+                else:
+                    context.engine.extract_entry(context, entry, writer)
             progress.advance(items=1, detail=entry.path or destination.name)
     finally:
         progress.finish()
     _write_unpacked_metadata(context, output_root, entries)
+
+
+def _try_extract_restored_entry(context: ArchiveContext, entry: ArchiveEntry, output_stream: ProgressWriter) -> bool:
+    extractor = getattr(context.engine, "try_extract_restored_entry", None)
+    return bool(callable(extractor) and extractor(context, entry, output_stream))
 
 
 def _write_unpacked_metadata(context: ArchiveContext, output_root: Path, entries: list[ArchiveEntry]) -> None:

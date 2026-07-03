@@ -804,14 +804,32 @@ class BfpkManifestMixin:
             "record_offset": record.offset,
             "record_header_size": payload_header_size,
             "declared_size": record.uncompressed_size,
+            "raw_payload_offset": record.offset + payload_header_size,
+            "raw_payload_size": record.aux1,
             "opaque_hash": record.table_hash,
             "aux0": record.aux0,
         }
-        if self._blades_of_fire_pics_is_packed_jpeg(record.path):
+        suffix = PurePosixPath(record.path).suffix.lower()
+        if suffix in {".dds", ".gif", ".png", ".jpg", ".jpeg"}:
+            metadata.update(
+                {
+                    "restore_format": suffix[1:] if suffix != ".jpeg" else "jpg",
+                    "restore_transform": "blades-packed-lz4",
+                    "restored": False,
+                }
+            )
+        if suffix in {".dds", ".png"}:
+            metadata.update(
+                {
+                    "packed_format": f"blades_of_fire_{suffix[1:]}",
+                }
+            )
+            if suffix == ".dds":
+                metadata["embedded_first_payload_byte"] = payload_header_size == 9
+        elif self._blades_of_fire_pics_is_packed_jpeg(record.path):
             metadata.update(
                 {
                     "packed_format": "blades_of_fire_jpeg",
-                    "restored": False,
                     "embedded_first_payload_byte": payload_header_size == 9,
                 }
             )
@@ -828,6 +846,8 @@ class BfpkManifestMixin:
         suffix = PurePosixPath(path).suffix.lower()
         first_flag_payload_byte = bytes([(flags >> 8) & 0xFF])
         payload_from_9 = first_flag_payload_byte + probe
+        if suffix == ".dds" and payload_from_9.startswith(b"DDS "):
+            return 9
         if suffix == ".gif" and payload_from_9.startswith((b"GIF87a", b"GIF89a")):
             return 9
         if suffix in {".jpg", ".jpeg"} and payload_from_9.startswith(b"\xFF\xD8"):
@@ -871,22 +891,28 @@ class BfpkManifestMixin:
             raise ValueError("BFPK Spacelords 0xD01 stored size does not match the table")
 
         payload_header_size = self._spacelords_d01_payload_header_size(record.path, flags, probe)
-        return ArchiveEntry(
-            path=record.path,
-            offset=record.offset + payload_header_size,
-            uncompressed_size=record.aux1,
-            stored_size=record.aux1,
-            flags=flags,
-            metadata={
+        metadata = {
                 "compressed": False,
                 "archive_version": self.spacelords_d01_archive_version,
                 "table_format": self.spacelords_layout,
                 "record_offset": record.offset,
                 "record_header_size": payload_header_size,
                 "declared_size": record.uncompressed_size,
+                "payload_block_offset": record.offset + 4,
+                "payload_block_size": record.aux1,
                 "opaque_hash": record.table_hash,
                 "aux0": record.aux0,
-            },
+        }
+        if PurePosixPath(record.path).suffix.lower() in {".dds", ".gif", ".tga"}:
+            metadata["restore_compression"] = "lz4-block"
+
+        return ArchiveEntry(
+            path=record.path,
+            offset=record.offset + payload_header_size,
+            uncompressed_size=record.aux1,
+            stored_size=record.aux1,
+            flags=flags,
+            metadata=metadata,
         )
 
     def _spacelords_d01_payload_header_size(self, path: str, flags: int, probe: bytes) -> int:
