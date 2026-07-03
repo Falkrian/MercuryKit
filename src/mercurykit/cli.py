@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import sys
 
-from mercurykit.archive import ArchiveContext, ArchiveEntry, UnsupportedOperation
+from mercurykit.archive import ArchiveContext, ArchiveEntry, ArchiveInfo, UnsupportedOperation
 from mercurykit.bfpk import BfpkEngine
 from mercurykit.mirror_of_fate import MirrorOfFatePackEngine
 from mercurykit.progress import NullProgressReporter, ProgressReporter, ProgressWriter, TerminalProgressReporter
@@ -104,6 +104,8 @@ def _scan(args: argparse.Namespace, scanner: ArchiveScanner) -> int:
         match = outcome.selected
         entry_count = "unknown" if outcome.info is None or outcome.info.entry_count is None else str(outcome.info.entry_count)
         print(f"File: {file}\n\n{match.format_name}\nConfidence = {match.confidence:.2f} \nEntries = {entry_count}\n")
+        if outcome.info is not None:
+            print(_format_repack_guidance(file, outcome.info))
 
         if args.verbose:
             if match.reason:
@@ -165,6 +167,105 @@ def _format_entry(entry: ArchiveEntry) -> str:
             continue
         parts.append(f"{field.name}={value!r}")
     return " ".join(parts)
+
+
+def _format_repack_guidance(archive_path: Path, info: ArchiveInfo) -> str:
+    command, notes = _repack_guidance_parts(archive_path, info)
+    lines = ["Repack:", f"  {command}"]
+    lines.extend(f"  Note: {note}" for note in notes)
+    return "\n".join(lines) + "\n"
+
+
+def _repack_guidance_parts(archive_path: Path, info: ArchiveInfo) -> tuple[str, list[str]]:
+    metadata = info.metadata
+    if info.format_name == MirrorOfFatePackEngine.format_name:
+        return _mirror_of_fate_repack_guidance(archive_path, metadata)
+
+    table_format = metadata.get("table_format")
+    archive_version = metadata.get("archive_version")
+    options: list[tuple[str, object]] = []
+    notes: list[str] = []
+
+    if table_format == BfpkEngine.scrapland_layout:
+        options.append(("layout", BfpkEngine.scrapland_layout))
+        notes.append("Optional validation: --option archive_version=0")
+    elif table_format == BfpkEngine.legacy_layout:
+        if isinstance(archive_version, int):
+            options.append(("archive_version", archive_version))
+        _add_chunk_size_option(options, metadata, {0x102})
+        _add_trailing_padding_option(options, metadata, archive_version)
+        if archive_version in {0x101, 0x102}:
+            notes.append("compression_level is optional and cannot be recovered from an existing archive.")
+    elif table_format in {
+        BfpkEngine.blades_of_fire_layout,
+        BfpkEngine.spacelords_layout,
+        BfpkEngine.lords_of_shadow_ultimate_layout,
+    }:
+        options.append(("layout", table_format))
+        if isinstance(archive_version, int):
+            options.append(("archive_version", archive_version))
+        _add_chunk_size_option(options, metadata, {0x102, 0x502})
+        _add_trailing_padding_option(options, metadata, archive_version)
+        if table_format == BfpkEngine.lords_of_shadow_ultimate_layout and archive_version == 0x3:
+            notes.append("compression_level is optional and cannot be recovered from an existing archive.")
+    else:
+        notes.append("No layout-specific repack options were recovered from this archive.")
+
+    command = _repack_command(archive_path, options)
+    return command, notes
+
+
+def _mirror_of_fate_repack_guidance(archive_path: Path, metadata: dict[str, object]) -> tuple[str, list[str]]:
+    notes = ["Mirror of Fate HD .pack output is auto-selected when no BFPK options are supplied."]
+    pack_size = metadata.get("pack_size")
+    if isinstance(pack_size, int):
+        notes.append(f"Optional validation: --option pack_size={_format_repack_option_value(pack_size)}")
+    return _repack_command(archive_path, []), notes
+
+
+def _add_chunk_size_option(
+    options: list[tuple[str, object]],
+    metadata: dict[str, object],
+    archive_versions: set[int],
+) -> None:
+    archive_version = metadata.get("archive_version")
+    file_chunk_size = metadata.get("file_chunk_size")
+    if isinstance(archive_version, int) and archive_version in archive_versions and isinstance(file_chunk_size, int):
+        options.append(("file_chunk_size", file_chunk_size))
+
+
+def _add_trailing_padding_option(
+    options: list[tuple[str, object]],
+    metadata: dict[str, object],
+    archive_version: object,
+) -> None:
+    # Encrypted picture archives include alignment bytes after payload records; that
+    # range is not equivalent to the explicit repack trailing_padding option.
+    if archive_version in {BfpkEngine.blades_of_fire_pics_archive_version, BfpkEngine.spacelords_d01_archive_version}:
+        return
+
+    trailing_padding = metadata.get("trailing_padding")
+    if isinstance(trailing_padding, int) and trailing_padding > 0:
+        options.append(("trailing_padding", trailing_padding))
+
+
+def _repack_command(archive_path: Path, options: list[tuple[str, object]]) -> str:
+    command = f'mercurykit repack <SOURCE_DIR> --output "{_repacked_output_name(archive_path)}"'
+    for key, value in options:
+        command += f" --option {key}={_format_repack_option_value(value)}"
+    return command
+
+
+def _repacked_output_name(archive_path: Path) -> str:
+    if archive_path.suffix:
+        return f"{archive_path.stem}.repacked{archive_path.suffix}"
+    return f"{archive_path.name}.repacked"
+
+
+def _format_repack_option_value(value: object) -> str:
+    if isinstance(value, int):
+        return f"0x{value:x}"
+    return str(value)
 
 
 def _unpack(args: argparse.Namespace, scanner: ArchiveScanner) -> int:

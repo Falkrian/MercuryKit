@@ -21,6 +21,7 @@ MercuryKit is a Python package and command line toolkit for working with Mercury
 
 - Scan individual files or whole directories for supported MercurySteam archives.
 - Recursively scan directory trees and print verbose archive details when needed.
+- Print scan-generated repack guidance by default, including the required options recovered from each archive such as `layout`, `archive_version`, `file_chunk_size`, and safely inferred `trailing_padding`.
 - Unpack archives with path safety checks to avoid writing outside the destination directory.
 - Repack extracted folders back into supported archive versions.
 - Preserve useful archive metadata, including encrypted picture archive table metadata.
@@ -71,12 +72,14 @@ python -m pip install -e ".[lz4]"
 
 ## Quick Start
 
+Start with `scan` for the archive you want to edit. MercuryKit prints a `Repack:` block by default with the command and options for that exact archive. Copy that command, replace `<SOURCE_DIR>` with your unpacked folder, and keep any recovered values such as `file_chunk_size` or `trailing_padding`.
+
 ### Scrapland Remastered
 
 Scan:
 
 ```powershell
-mercurykit scan "D:\Steam\steamapps\common\Scrapland\data.packed" --verbose
+mercurykit scan "D:\Steam\steamapps\common\Scrapland\data.packed"
 ```
 
 Unpack:
@@ -91,14 +94,14 @@ Repack:
 mercurykit repack ".\Output\scrapland-data" --output ".\data.repacked.packed" --option layout=scrapland
 ```
 
-Scrapland `.packed` archives are raw containers. MercuryKit recalculates the table offsets during repack and writes paths using Windows-compatible `cp1252` encoding.
+Scrapland `.packed` archives are raw containers. MercuryKit recalculates table offsets during repack and writes paths using Windows-compatible `cp1252` encoding. `archive_version=0` may appear in scan notes as an optional validation value.
 
 ### Castlevania: Lords of Shadow - Ultimate Edition
 
 Scan:
 
 ```powershell
-mercurykit scan "D:\Steam\steamapps\common\CastlevaniaLoS\Data00.dat" --verbose
+mercurykit scan "D:\Steam\steamapps\common\CastlevaniaLoS\Data00.dat"
 ```
 
 Unpack:
@@ -110,7 +113,7 @@ mercurykit unpack "D:\Steam\steamapps\common\CastlevaniaLoS\Data00.dat" --dest "
 Repack a zlib-record `.dat` archive:
 
 ```powershell
-mercurykit repack ".\Output\losue-data00" --output ".\Data00.repacked.dat" --option layout=lords_of_shadow_ultimate --option archive_version=0x3 --option compression_level=6
+mercurykit repack ".\Output\losue-data00" --output ".\Data00.repacked.dat" --option layout=lords_of_shadow_ultimate --option archive_version=0x3
 ```
 
 Repack a raw `.dat` archive:
@@ -118,6 +121,8 @@ Repack a raw `.dat` archive:
 ```powershell
 mercurykit repack ".\Output\losue-data03" --output ".\Data03.repacked.dat" --option layout=lords_of_shadow_ultimate --option archive_version=0x2
 ```
+
+`compression_level` may be added for `0x3` zlib repacks, but MercuryKit cannot recover the original compression level from a scanned archive.
 
 ### Castlevania: Lords of Shadow 2
 
@@ -136,15 +141,17 @@ mercurykit unpack "D:\Steam\steamapps\common\Castlevania Lords of Shadow 2\Engli
 Repack:
 
 ```powershell
-mercurykit repack ".\Output\los2-english" --output ".\English.repacked" --option archive_version=0x102 --option file_chunk_size=262144 --option compression_level=6
+mercurykit repack ".\Output\los2-english" --output ".\English.repacked.packed" --option archive_version=0x102 --option file_chunk_size=0x40000 --option trailing_padding=0x8000
 ```
+
+Use the values printed by `scan` for the specific archive you are rebuilding. For zlib-based versions, `compression_level` is optional and is not shown as a recovered value.
 
 ### Castlevania Lords of Shadow - Mirror of Fate HD
 
 Scan:
 
 ```powershell
-mercurykit scan "D:\Steam\steamapps\common\Castlevania Lords of Shadow - Mirror of Fate HD\data.pack" --verbose
+mercurykit scan "D:\Steam\steamapps\common\Castlevania Lords of Shadow - Mirror of Fate HD\data.pack"
 ```
 
 Unpack:
@@ -160,6 +167,7 @@ mercurykit repack ".\Output\mofh-data" --output ".\data.repacked.pack"
 ```
 
 Mirror of Fate HD `.pack` output automatically uses the Mirror of Fate HD repacker when no BFPK `layout` or `archive_version` option is supplied. If `system/files.toc` is present, MercuryKit updates its path-hash and file-size records in the repacked archive.
+The `pack_size` value shown by `scan` is optional validation only; normal repacks do not require it.
 
 ### Blades of Fire
 
@@ -178,7 +186,7 @@ mercurykit unpack "D:\Steam\steamapps\common\Blades of Fire\Data00.packed" --des
 Repack:
 
 ```powershell
-mercurykit repack ".\Output\blades-data" --output ".\Data00.repacked.packed" --option layout=blades_of_fire --option archive_version=0x102
+mercurykit repack ".\Output\blades-data" --output ".\Data00.repacked.packed" --option layout=blades_of_fire --option archive_version=0x102 --option file_chunk_size=0x40000 --option trailing_padding=0x8000
 ```
 
 Repack encrypted picture archives with the picture layout version:
@@ -186,6 +194,8 @@ Repack encrypted picture archives with the picture layout version:
 ```powershell
 mercurykit repack ".\Output\blades-pics" --output ".\Pics.repacked.packed" --option layout=blades_of_fire --option archive_version=0x901
 ```
+
+Encrypted picture archives do not need a `trailing_padding` option in the scan-generated command.
 
 ### Spacelords
 
@@ -204,7 +214,7 @@ mercurykit unpack "D:\Steam\steamapps\common\Spacelords\Data00.packed" --dest ".
 Repack:
 
 ```powershell
-mercurykit repack ".\Output\spacelords-data" --output ".\Data00.repacked.packed" --option layout=spacelords --option archive_version=0x502
+mercurykit repack ".\Output\spacelords-data" --output ".\Data00.repacked.packed" --option layout=spacelords --option archive_version=0x502 --option file_chunk_size=0x40000 --option trailing_padding=0x10000
 ```
 
 Repack encrypted picture archives with the picture layout version:
@@ -229,15 +239,16 @@ mercurykit scan "D:\Steam\steamapps\common" --recursive --verbose
 mercurykit scan PATH... [--recursive] [--verbose]
 ```
 
-Scans files or directories for all supported archive types.
+Scans files or directories for all supported archive types. Default scan output includes the file path, format, confidence, entry count, and a `Repack:` command with the recovered options MercuryKit needs to rebuild the same archive family.
 
 | Switch | Description |
 | --- | --- |
 | `PATH...` | One or more files or directories to scan. |
 | `-r`, `--recursive` | Recursively scan directories. |
-| `--verbose` | Print additional archive details, including match reasons and manifest summaries. |
+| `--verbose` | Print additional archive details, including match reasons and entry listings. |
 
 Empty files are skipped. A scan of unsupported files reports that no compatible archive was found.
+Use the scan-generated repack guidance as the safest starting point for repacking; replace `<SOURCE_DIR>` with the folder you unpacked or edited.
 
 ### `mercurykit unpack`
 
@@ -275,6 +286,8 @@ Builds an archive from a directory tree.
 
 `--option` values accept strings, decimal integers, hexadecimal integers such as `0x901`, and booleans.
 
+Run `mercurykit scan` on the original archive before repacking. The printed `Repack:` command includes required values such as `layout`, `archive_version`, `file_chunk_size`, and safely recovered `trailing_padding` when those values apply.
+
 Mirror of Fate HD repacks are selected automatically when `--output` ends in `.pack` and no BFPK `layout` or `archive_version` option is supplied. Scrapland Remastered `.packed` repacks use `layout=scrapland`. Castlevania: Lords of Shadow - Ultimate Edition `.dat` repacks use `layout=lords_of_shadow_ultimate` with `archive_version=0x2` or `archive_version=0x3`. Other BFPK repacks use the options below.
 
 ## Repack Options
@@ -284,8 +297,8 @@ Mirror of Fate HD repacks are selected automatically when `--output` ends in `.p
 | `archive_version` | Required for most BFPK repacks, or optional validation for Scrapland. Examples include `0`, `0x2`, `0x3`, `0x100`, `0x102`, `0x500`, `0x502`, `0x901`, and `0xd01`. |
 | `layout` | Archive layout. Supported values include `scrapland`, `legacy`, `lords_of_shadow_ultimate`, `blades_of_fire`, and `spacelords`. Defaults to `legacy`. |
 | `file_chunk_size` | Positive chunk size used by chunked compressed archive versions. |
-| `trailing_padding` | Non-negative number of padding bytes to append after archive data. |
-| `compression_level` | zlib compression level for zlib-based repacks. Defaults to Python's zlib default. |
+| `trailing_padding` | Non-negative number of padding bytes to append after archive data. Scan output includes this only when the value can be safely inferred. |
+| `compression_level` | Optional zlib compression level for zlib-based repacks. Defaults to Python's zlib default and cannot be recovered from an existing archive. |
 | `pack_size` | Mirror of Fate HD `.pack` payload-area size validation value. MercuryKit computes this during repack and fails if a supplied value does not match. |
 
 Encrypted picture archive repacks preserve `opaque_hash` metadata for unchanged files when manifest metadata is available. New or changed entries receive a deterministic value; MercuryKit does not validate that field as a CRC.

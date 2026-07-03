@@ -111,6 +111,7 @@ class BfpkEngine(BfpkManifestMixin, BfpkExtractionMixin, BfpkRepackMixin, BfpkCo
             self._entry_for_version(reader, header.archive_version, header.file_chunk_size, layout, record)
             for record in records
         ]
+        trailing_padding = self._infer_trailing_padding(reader, entries, file_size)
 
         return ArchiveInfo(
             self.format_name,
@@ -119,6 +120,7 @@ class BfpkEngine(BfpkManifestMixin, BfpkExtractionMixin, BfpkRepackMixin, BfpkCo
                 "archive_version": header.archive_version,
                 "file_chunk_size": header.file_chunk_size,
                 "table_format": layout,
+                "trailing_padding": trailing_padding,
                 "encrypted_table_size": header.encrypted_table_size,
                 "table_prefix": header.table_prefix,
                 "entries": tuple(entries),
@@ -138,5 +140,47 @@ class BfpkEngine(BfpkManifestMixin, BfpkExtractionMixin, BfpkRepackMixin, BfpkCo
         if isinstance(context.state, BfpkState):
             return context.state
         return BfpkState(tuple(context.info.metadata["entries"]))
+
+    def _infer_trailing_padding(
+        self,
+        reader: BinaryReader,
+        entries: Iterable[ArchiveEntry],
+        file_size: int,
+    ) -> int | None:
+        data_end = self._entries_data_end(entries)
+        if data_end is None or data_end > file_size:
+            return None
+
+        padding_size = file_size - data_end
+        if padding_size == 0:
+            return 0
+
+        old_position = reader.tell()
+        try:
+            reader.seek(data_end)
+            padding = reader.read_exact(padding_size)
+        finally:
+            reader.seek(old_position)
+        return padding_size if not any(padding) else None
+
+    def _entries_data_end(self, entries: Iterable[ArchiveEntry]) -> int | None:
+        ends: list[int] = []
+        for entry in entries:
+            end = self._entry_data_end(entry)
+            if end is None:
+                return None
+            ends.append(end)
+        return max(ends, default=0)
+
+    def _entry_data_end(self, entry: ArchiveEntry) -> int | None:
+        if not isinstance(entry.offset, int) or not isinstance(entry.stored_size, int):
+            return None
+
+        payload_record_offset = entry.metadata.get("payload_record_offset")
+        if isinstance(payload_record_offset, int):
+            return payload_record_offset + entry.stored_size
+        if entry.metadata.get("archive_version") == 0x101:
+            return entry.offset - 4 + entry.stored_size
+        return entry.offset + entry.stored_size
 
 
