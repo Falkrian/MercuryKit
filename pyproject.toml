@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mercurykit"
-version = "0.1.2"
+version = "0.1.3"
 description = "MercurySteam archive scanner, extractor, and repacker."
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [{ name = "MercuryKit Contributors" }]
+authors = [{ name = "Falkrian" }]
 license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["mercurysteam", "archive", "bfpk", "castlevania", "scrapland", "spacelords", "modding"]

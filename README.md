@@ -38,7 +38,7 @@ MercuryKit is a Python package and command line toolkit for working with Mercury
 | Castlevania: Lords of Shadow - Ultimate Edition | Full | Supports Steam `.dat` archives using AES-256-CBC encrypted file tables, including raw `0x2` and zlib-record `0x3` variants. |
 | Castlevania: Lords of Shadow 2 | Full | Supports archive versions `0x100`, `0x101`, and `0x102`, including raw, zlib, and chunked zlib variants. |
 | Castlevania Lords of Shadow - Mirror of Fate HD | Full | Supports `.pack` archives, including scan, unpack, directory-based repack, computed header fields, and automatic `system/files.toc` updates. |
-| Blades of Fire | Full* | Supports archive versions `0x100`, `0x102`, `0x300`, and encrypted `Pics.packed` archives using `0x901`, including optional viewer-ready DDS/GIF/PNG/JPG restore during unpack. |
+| Blades of Fire | Full* | Supports archive versions `0x100`, `0x102`, `0x300`, and encrypted `Pics.packed` archives using `0x901`, including optional viewer-ready DDS/GIF/PNG/JPG restore during unpack and automatic CRC fixup trailer writing during repack. |
 | Spacelords | Full | Supports archive versions `0x500`, `0x502`, and encrypted `Pics.packed` archives using `0xD01`, including LZ4-block variants and optional viewer-ready DDS/GIF/TGA restore during unpack. |
 
 Blades of Fire `0x901` picture archives unpack raw packed payloads by default for archive round trips. Use `--restore-textures` when you want viewer-ready DDS, GIF, PNG, or JPG output.
@@ -187,13 +187,13 @@ mercurykit unpack "D:\Steam\steamapps\common\Blades of Fire\Data00.packed" --des
 Repack:
 
 ```powershell
-mercurykit repack ".\Output\blades-data" --output ".\Data00.repacked.packed" --option layout=blades_of_fire --option archive_version=0x102 --option file_chunk_size=0x40000 --option trailing_padding=0x8000
+mercurykit repack ".\Output\blades-data" --output ".\Data00.repacked.packed" --option layout=blades_of_fire --option archive_version=0x102 --option file_chunk_size=0x40000 --option trailing_padding=0x40000
 ```
 
 Repack encrypted picture archives with the picture layout version:
 
 ```powershell
-mercurykit repack ".\Output\blades-pics" --output ".\Pics.repacked.packed" --option layout=blades_of_fire --option archive_version=0x901
+mercurykit repack ".\Output\blades-pics" --output ".\Pics.repacked.packed" --option layout=blades_of_fire --option archive_version=0x901 --option trailing_padding=0x3fff6
 ```
 
 Unpack `Pics.packed` with verified viewer-ready restoration for DDS, GIF, PNG, and JPG picture assets:
@@ -202,7 +202,7 @@ Unpack `Pics.packed` with verified viewer-ready restoration for DDS, GIF, PNG, a
 mercurykit unpack "D:\Steam\steamapps\common\Blades of Fire\Pics.packed" --dest ".\Output\blades-pics-restored" --restore-textures
 ```
 
-Encrypted picture archives do not need a `trailing_padding` option in the scan-generated command.
+Blades of Fire repacks automatically append the archive CRC fixup trailer used by the game. All Blades `.packed` archives checked so far use this trailer, including `Data00.packed`, `Data01.packed`, `English.packed`, `HUD.packed`, `Music.packed`, `Pics.packed`, and `Videos.packed`; copy the `trailing_padding` value printed by `scan` for the exact archive you are rebuilding.
 
 ### Spacelords
 

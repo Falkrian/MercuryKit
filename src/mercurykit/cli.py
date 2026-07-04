@@ -244,9 +244,11 @@ def _add_trailing_padding_option(
     metadata: dict[str, object],
     archive_version: object,
 ) -> None:
-    # Encrypted picture archives include alignment bytes after payload records; that
-    # range is not equivalent to the explicit repack trailing_padding option.
-    if archive_version in {BfpkEngine.blades_of_fire_pics_archive_version, BfpkEngine.spacelords_d01_archive_version}:
+    # Spacelords encrypted picture archives include alignment bytes after payload
+    # records; that range is not equivalent to the explicit repack padding option.
+    # Blades of Fire 0x901 also has an end CRC trailer, so its recovered value is
+    # useful and should be shown.
+    if archive_version == BfpkEngine.spacelords_d01_archive_version:
         return
 
     trailing_padding = metadata.get("trailing_padding")

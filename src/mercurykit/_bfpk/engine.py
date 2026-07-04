@@ -161,7 +161,13 @@ class BfpkEngine(BfpkManifestMixin, BfpkExtractionMixin, BfpkRepackMixin, BfpkCo
             padding = reader.read_exact(padding_size)
         finally:
             reader.seek(old_position)
-        return padding_size if not any(padding) else None
+        if not any(padding):
+            return padding_size
+
+        if padding_size >= 8 and padding[-4:] == self.archive_magic and not any(padding[:-8]):
+            return padding_size - 8
+
+        return None
 
     def _entries_data_end(self, entries: Iterable[ArchiveEntry]) -> int | None:
         ends: list[int] = []

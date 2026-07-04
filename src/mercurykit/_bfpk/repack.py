@@ -194,6 +194,7 @@ class BfpkRepackMixin:
 
                 if trailing_padding:
                     output.write(b"\x00" * trailing_padding)
+                self._write_blades_of_fire_crc_trailer(output)
             finally:
                 progress.finish()
 
@@ -601,6 +602,8 @@ class BfpkRepackMixin:
 
                 if trailing_padding:
                     output.write(b"\x00" * trailing_padding)
+                if archive_version == self.blades_of_fire_pics_archive_version:
+                    self._write_blades_of_fire_crc_trailer(output)
             finally:
                 progress.finish()
 
@@ -623,6 +626,24 @@ class BfpkRepackMixin:
             table += struct.pack("<I", 0)
             table += struct.pack("<I", repack_file.uncompressed_size)
         return bytes(table)
+
+    def _write_blades_of_fire_crc_trailer(self, output: BinaryIO) -> None:
+        """Append the Blades trailer that makes CRC32(data before final magic) equal 0xffffffff."""
+
+        output.flush()
+        end_offset = output.tell()
+        crc = 0
+        output.seek(0)
+        remaining = end_offset
+        while remaining:
+            chunk = output.read(min(8 * 1024 * 1024, remaining))
+            if not chunk:
+                raise ValueError("BFPK Blades of Fire trailer CRC read stopped early")
+            remaining -= len(chunk)
+            crc = zlib.crc32(chunk, crc)
+        output.seek(end_offset)
+        output.write(struct.pack("<I", (~crc) & self.max_u32))
+        output.write(self.archive_magic)
 
     def _spacelords_d01_record_size(self, repack_file: BfpkRepackFile) -> int:
         if self._spacelords_d01_uses_embedded_first_payload_byte(repack_file):
